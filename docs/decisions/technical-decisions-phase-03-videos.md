@@ -1,7 +1,7 @@
 ---
 scope_type: phase
 related_phases: [3]
-status: pending
+status: decided
 date: 2026-09-11
 scope_description: "Backend foundation for large-file video upload and asynchronous processing: object storage client and key layout, background queue technology, the 10GB upload protocol, upload-completion handshake, worker process topology, FFmpeg metadata/thumbnail extraction, unique public video URL, streaming/download delivery, video status lifecycle, and the integration-test strategy for the new infrastructure."
 ---
@@ -45,7 +45,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (`@aws-sdk/client-s3` v3)** — the architecture explicitly targets "S3 or MinIO" as one interchangeable container, and only the AWS SDK honours that with a single codebase. The extra verbosity is absorbed once inside a `StorageService` wrapper; the portability is structural and cannot be retrofitted cheaply.
 
-**Decision:** _[pending]_
+**Decision:** A (@aws-sdk/client-s3 v3)
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ---
 
@@ -76,7 +77,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option B (two buckets)** — the access profiles genuinely differ, and bucket-level policy is the correct place to express that. Suggested keys: `videos/{videoId}/original{ext}` and `thumbnails/{videoId}/frame.jpg`. Keying by the internal `videoId` (not the public URL id from TD-08) keeps storage stable if the public id is ever rotated.
 
-**Decision:** _[pending]_
+**Decision:** B (Two buckets — private videos + public-read thumbnails)
+**Libraries:** —
 
 ---
 
@@ -107,7 +109,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (BullMQ + Redis)** — the deciding factor is stalled-job handling for long FFmpeg runs. BullMQ renews a worker's lock while the job is alive and recovers it if the worker dies; pg-boss's fixed expiry either kills legitimate long jobs or leaves dead ones stuck, and getting that window right for a file range of a few MB to 10GB is guesswork. The official `@nestjs/bullmq` module also matches the project's established "first-party Nest integration where one exists" pattern. pg-boss is a genuinely strong runner-up whose "no new container" advantage is real — if the reviewer weights infrastructure minimalism above lock semantics, it is a defensible choice, but it must then pair with a conservatively long `expireInSeconds` and an explicit idempotency guard on the processing job.
 
-**Decision:** _[pending]_
+**Decision:** A (BullMQ + Redis via @nestjs/bullmq)
+**Libraries:** bullmq, @nestjs/bullmq, ioredis
 
 ---
 
@@ -143,7 +146,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option C (presigned multipart brokered by the API)** — the only option that both clears the 10GB bar and keeps the file off the API process, using nothing but standard S3 semantics that work identically on MinIO today and S3 later. Option B is arithmetically excluded by the 5 GiB single-PUT limit; Option A is the documented anti-pattern. Pair with a bucket lifecycle rule aborting incomplete uploads after ~24h.
 
-**Decision:** _[pending]_
+**Decision:** C (Presigned multipart upload brokered by the API)
+**Libraries:** —
 
 ---
 
@@ -174,7 +178,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (API-brokered completion)** — TD-04 already routes completion through the API, so the signal exists for free and no vendor-specific eventing is needed; this also keeps the flow fully exercisable in integration tests. Adopt Option C narrowly as a **janitor**, not a trigger: a low-frequency sweep that aborts incomplete multipart uploads and fails rows abandoned in `uploading` past a TTL. Option B is the right hardening step only if a non-first-party client is ever allowed to upload.
 
-**Decision:** _[pending]_
+**Decision:** A (API-brokered completion, plus a janitor sweep from Option C)
+**Libraries:** —
 
 ---
 
@@ -205,7 +210,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (separate container, shared codebase)** — it is the only option that satisfies the diagram and the isolation requirement without duplicating the data model. `createApplicationContext()` is the standard Nest idiom for a non-HTTP process and gives the worker the same DI graph the API uses.
 
-**Decision:** _[pending]_
+**Decision:** A (Separate container, shared codebase, own entrypoint)
+**Libraries:** —
 
 ---
 
@@ -238,7 +244,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option B (direct `child_process`)** — with only two operations required, a wrapper earns very little, while the CLI contract it would hide is precisely the part that is stable. `ffprobe -print_format json` is effectively a structured API already. This also keeps the phase free of a dependency whose predecessor just died mid-project.
 
-**Decision:** _[pending]_
+**Decision:** B (Direct child_process invocation of ffmpeg / ffprobe)
+**Libraries:** —
 
 ---
 
@@ -269,7 +276,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option C (`node:crypto` short id)** — it delivers exactly what Option B delivers while staying consistent with how this codebase already generates opaque identifiers, and without adding a dependency for one call. Enforce uniqueness with a DB unique index and retry on violation; 64 bits makes a collision negligible at this scale, and the index makes it impossible rather than merely unlikely.
 
-**Decision:** _[pending]_
+**Decision:** C (Dedicated short public_id generated with node:crypto)
+**Libraries:** —
 
 ---
 
@@ -300,7 +308,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option B (short-lived presigned GET)** — it is what the architecture diagram already specifies, it satisfies "sem necessidade de download completo" through native S3 `Range` support without writing any range code, and it covers the download bullet via a `content-disposition` override on the same primitive. Suggested expiry in the 15–60 min range, re-issued on demand. Option C is a legitimate future phase, not this one.
 
-**Decision:** _[pending]_
+**Decision:** B (Short-lived presigned GET, client streams from storage)
+**Libraries:** —
 
 ---
 
@@ -331,7 +340,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (single enum + `processing_error`)** — it maps one-to-one onto the required cycle, keeps the reflected state trivially queryable, and delegates retry to BullMQ (TD-03) so that only genuinely terminal failures are persisted as `failed`. Record the reason in `processing_error` so a failed video can be diagnosed without reading worker logs.
 
-**Decision:** _[pending]_
+**Decision:** A (Single status enum + processing_error)
+**Libraries:** —
 
 ---
 
@@ -362,7 +372,8 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (real MinIO and Redis from Compose)** — it is the convention this repository already runs on, and it is what the phase explicitly demands. Keep the layering rules from `nestjs-project/CLAUDE.md`: real-service tests are `*.integration-spec.ts`, pure logic (e.g. `ffprobe` JSON parsing, key derivation) stays in `*.spec.ts` with mocks, and full HTTP flows are `*.e2e-spec.ts`. Add per-suite bucket/queue cleanup mirroring the existing `cleanAllTables` helper.
 
-**Decision:** _[pending]_
+**Decision:** A (Real MinIO and Redis from Compose)
+**Libraries:** —
 
 ---
 
@@ -401,7 +412,8 @@ _Subprojects in scope:_
 
 **Depends on:** TD-04 (presigned multipart) and TD-09 (presigned GET). Had `ICC-1` been resolved toward an API-proxied range path, this TD would have narrowed to the upload leg only.
 
-**Decision:** _[pending]_
+**Decision:** A (Two endpoints, two clients)
+**Libraries:** —
 
 ---
 
@@ -436,7 +448,8 @@ _Subprojects in scope:_
 
 **Depends on:** TD-04 (defines the part plan being signed), TD-05 (API-brokered completion is where verification is triggered), TD-07 (`ffprobe` supplies the real media type), TD-10 (`failed` + `processing_error` is the reject path).
 
-**Decision:** _[pending]_
+**Decision:** C (Both — declare-then-bind admission control + post-completion verification)
+**Libraries:** —
 
 ---
 
@@ -444,19 +457,19 @@ _Subprojects in scope:_
 
 | ID | Scope | Decision | Recommendation | Choice |
 |----|-------|----------|---------------|--------|
-| TD-01 | Backend | Object Storage Client Library | `@aws-sdk/client-s3` v3 | _[pending]_ |
-| TD-02 | Backend | Bucket Topology and Object Key Layout | Two buckets (private videos + public thumbnails) | _[pending]_ |
-| TD-03 | Backend | Background Processing Queue Technology | BullMQ + Redis via `@nestjs/bullmq` | _[pending]_ |
-| TD-04 | Cross-layer | 10GB Upload Protocol | Presigned multipart brokered by the API | _[pending]_ |
-| TD-05 | Cross-layer | Draft Pre-registration and Completion Handshake | API-brokered completion (+ janitor sweep) | _[pending]_ |
-| TD-06 | Backend | Video Worker Process Topology | Separate container, shared codebase | _[pending]_ |
-| TD-07 | Backend | FFmpeg Invocation (metadata + thumbnail) | Direct `child_process` spawn | _[pending]_ |
-| TD-08 | Cross-layer | Unique Public Video URL Identifier | Short `public_id` from `node:crypto` | _[pending]_ |
-| TD-09 | Cross-layer | Playback Streaming and Download Delivery | Short-lived presigned `GET` | _[pending]_ |
-| TD-10 | Backend | Video Status Lifecycle and Failure Policy | Single enum + `processing_error` | _[pending]_ |
-| TD-11 | Backend | Integration-Test Strategy for Storage and Queue | Real MinIO + Redis from Compose | _[pending]_ |
-| TD-12 | Cross-layer | Storage Endpoint Addressing for Presigned URLs | Two endpoints, two clients | _[pending]_ |
-| TD-13 | Cross-layer | Upload Admission Control (10GB ceiling + content types) | Both — declare-then-bind + post-completion verification | _[pending]_ |
+| TD-01 | Backend | Object Storage Client Library | `@aws-sdk/client-s3` v3 | A (@aws-sdk/client-s3 v3) |
+| TD-02 | Backend | Bucket Topology and Object Key Layout | Two buckets (private videos + public thumbnails) | B (Two buckets) |
+| TD-03 | Backend | Background Processing Queue Technology | BullMQ + Redis via `@nestjs/bullmq` | A (BullMQ + Redis) |
+| TD-04 | Cross-layer | 10GB Upload Protocol | Presigned multipart brokered by the API | C (Presigned multipart brokered by the API) |
+| TD-05 | Cross-layer | Draft Pre-registration and Completion Handshake | API-brokered completion (+ janitor sweep) | A (API-brokered completion + janitor sweep) |
+| TD-06 | Backend | Video Worker Process Topology | Separate container, shared codebase | A (Separate container, shared codebase) |
+| TD-07 | Backend | FFmpeg Invocation (metadata + thumbnail) | Direct `child_process` spawn | B (Direct `child_process`) |
+| TD-08 | Cross-layer | Unique Public Video URL Identifier | Short `public_id` from `node:crypto` | C (`node:crypto` short id) |
+| TD-09 | Cross-layer | Playback Streaming and Download Delivery | Short-lived presigned `GET` | B (Short-lived presigned GET) |
+| TD-10 | Backend | Video Status Lifecycle and Failure Policy | Single enum + `processing_error` | A (Single enum + `processing_error`) |
+| TD-11 | Backend | Integration-Test Strategy for Storage and Queue | Real MinIO + Redis from Compose | A (Real MinIO + Redis from Compose) |
+| TD-12 | Cross-layer | Storage Endpoint Addressing for Presigned URLs | Two endpoints, two clients | A (Two endpoints, two clients) |
+| TD-13 | Cross-layer | Upload Admission Control (10GB ceiling + content types) | Both — declare-then-bind + post-completion verification | C (Both mechanisms) |
 
 ## Sources
 

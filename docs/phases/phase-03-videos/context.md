@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-09-11T10:26:34+00:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-11T13:02:31+00:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-11T13:19:34.458156+00:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-09-11T10:26:34+00:00"
   docs/phases/phase-01-configuracao-base/context.md: "2026-09-11T10:26:34+00:00"
   docs/phases/phase-02-auth/context.md: "2026-09-11T10:26:34+00:00"
@@ -50,19 +50,19 @@ Phase lead sentence (verbatim): "Upload de arquivos grandes sem travar o sistema
 
 | Ref | Source | Scope | Topic | Status | Decision | Libraries |
 |-----|--------|-------|-------|--------|----------|-----------|
-| phase-03-videos/TD-01 | phase | Backend | Object Storage Client Library | pending | — | — |
-| phase-03-videos/TD-02 | phase | Backend | Bucket Topology and Object Key Layout | pending | — | — |
-| phase-03-videos/TD-03 | phase | Backend | Background Processing Queue Technology | pending | — | — |
-| phase-03-videos/TD-04 | phase | Cross-layer | 10GB Upload Protocol | pending | — | — |
-| phase-03-videos/TD-05 | phase | Cross-layer | Draft Pre-registration and Upload-Completion Handshake | pending | — | — |
-| phase-03-videos/TD-06 | phase | Backend | Video Worker Process Topology | pending | — | — |
-| phase-03-videos/TD-07 | phase | Backend | FFmpeg Invocation for Metadata Extraction and Thumbnail | pending | — | — |
-| phase-03-videos/TD-08 | phase | Cross-layer | Unique Public Video URL Identifier | pending | — | — |
-| phase-03-videos/TD-09 | phase | Cross-layer | Playback Streaming and Download Delivery | pending | — | — |
-| phase-03-videos/TD-10 | phase | Backend | Video Status Lifecycle and Processing-Failure Policy | pending | — | — |
-| phase-03-videos/TD-11 | phase | Backend | Integration-Test Strategy for Storage and Queue | pending | — | — |
-| phase-03-videos/TD-12 | phase | Cross-layer | Storage Endpoint Addressing for Presigned URLs | pending | — | — |
-| phase-03-videos/TD-13 | phase | Cross-layer | Upload Admission Control — 10GB Ceiling and Accepted Content Types | pending | — | — |
+| phase-03-videos/TD-01 | phase | Backend | Object Storage Client Library | decided | A (@aws-sdk/client-s3 v3) | @aws-sdk/client-s3, @aws-sdk/s3-request-presigner |
+| phase-03-videos/TD-02 | phase | Backend | Bucket Topology and Object Key Layout | decided | B (Two buckets) | — |
+| phase-03-videos/TD-03 | phase | Backend | Background Processing Queue Technology | decided | A (BullMQ + Redis) | bullmq, @nestjs/bullmq, ioredis |
+| phase-03-videos/TD-04 | phase | Cross-layer | 10GB Upload Protocol | decided | C (Presigned multipart brokered by the API) | — |
+| phase-03-videos/TD-05 | phase | Cross-layer | Draft Pre-registration and Upload-Completion Handshake | decided | A (API-brokered completion + janitor sweep) | — |
+| phase-03-videos/TD-06 | phase | Backend | Video Worker Process Topology | decided | A (Separate container, shared codebase) | — |
+| phase-03-videos/TD-07 | phase | Backend | FFmpeg Invocation for Metadata Extraction and Thumbnail | decided | B (Direct `child_process`) | — |
+| phase-03-videos/TD-08 | phase | Cross-layer | Unique Public Video URL Identifier | decided | C (`node:crypto` short id) | — |
+| phase-03-videos/TD-09 | phase | Cross-layer | Playback Streaming and Download Delivery | decided | B (Short-lived presigned GET) | — |
+| phase-03-videos/TD-10 | phase | Backend | Video Status Lifecycle and Processing-Failure Policy | decided | A (Single enum + `processing_error`) | — |
+| phase-03-videos/TD-11 | phase | Backend | Integration-Test Strategy for Storage and Queue | decided | A (Real MinIO + Redis from Compose) | — |
+| phase-03-videos/TD-12 | phase | Cross-layer | Storage Endpoint Addressing for Presigned URLs | decided | A (Two endpoints, two clients) | — |
+| phase-03-videos/TD-13 | phase | Cross-layer | Upload Admission Control — 10GB Ceiling and Accepted Content Types | decided | C (Both mechanisms) | — |
 
 `Renders in` column omitted: no TD in scope sets the field (all `—`).
 
@@ -86,7 +86,70 @@ _Source files:_
 
 ## Decisions Detail
 
-_No decided TDs yet — all 13 TDs of this slice are `pending`. `/plan-resolve` populates this section once decisions are recorded._
+### phase-03-videos/TD-01
+
+**Recommendation:** the architecture explicitly targets "S3 or MinIO" as one interchangeable container, and only the AWS SDK honours that with a single codebase. The extra verbosity is absorbed once inside a `StorageService` wrapper; the portability is structural and cannot be retrofitted cheaply.
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
+
+### phase-03-videos/TD-02
+
+**Recommendation:** the access profiles genuinely differ, and bucket-level policy is the correct place to express that. Suggested keys: `videos/{videoId}/original{ext}` and `thumbnails/{videoId}/frame.jpg`. Keying by the internal `videoId` (not the public URL id from TD-08) keeps storage stable if the public id is ever rotated.
+**Libraries:** —
+
+### phase-03-videos/TD-03
+
+**Recommendation:** the deciding factor is stalled-job handling for long FFmpeg runs. BullMQ renews a worker's lock while the job is alive and recovers it if the worker dies; pg-boss's fixed expiry either kills legitimate long jobs or leaves dead ones stuck, and getting that window right for a file range of a few MB to 10GB is guesswork. The official `@nestjs/bullmq` module also matches the project's established "first-party Nest integration where one exists" pattern. pg-boss is a genuinely strong runner-up whose "no new container" advantage is real — if the reviewer weights infrastructure minimalism above lock semantics, it is a defensible choice, but it must then pair with a conservatively long `expireInSeconds` and an explicit idempotency guard on the processing job.
+**Libraries:** bullmq, @nestjs/bullmq, ioredis
+
+### phase-03-videos/TD-04
+
+**Recommendation:** the only option that both clears the 10GB bar and keeps the file off the API process, using nothing but standard S3 semantics that work identically on MinIO today and S3 later. Option B is arithmetically excluded by the 5 GiB single-PUT limit; Option A is the documented anti-pattern. Pair with a bucket lifecycle rule aborting incomplete uploads after ~24h.
+**Libraries:** —
+
+### phase-03-videos/TD-05
+
+**Recommendation:** TD-04 already routes completion through the API, so the signal exists for free and no vendor-specific eventing is needed; this also keeps the flow fully exercisable in integration tests. Adopt Option C narrowly as a **janitor**, not a trigger: a low-frequency sweep that aborts incomplete multipart uploads and fails rows abandoned in `uploading` past a TTL. Option B is the right hardening step only if a non-first-party client is ever allowed to upload.
+**Libraries:** —
+
+### phase-03-videos/TD-06
+
+**Recommendation:** it is the only option that satisfies the diagram and the isolation requirement without duplicating the data model. `createApplicationContext()` is the standard Nest idiom for a non-HTTP process and gives the worker the same DI graph the API uses.
+**Libraries:** —
+
+### phase-03-videos/TD-07
+
+**Recommendation:** with only two operations required, a wrapper earns very little, while the CLI contract it would hide is precisely the part that is stable. `ffprobe -print_format json` is effectively a structured API already. This also keeps the phase free of a dependency whose predecessor just died mid-project.
+**Libraries:** —
+
+### phase-03-videos/TD-08
+
+**Recommendation:** it delivers exactly what Option B delivers while staying consistent with how this codebase already generates opaque identifiers, and without adding a dependency for one call. Enforce uniqueness with a DB unique index and retry on violation; 64 bits makes a collision negligible at this scale, and the index makes it impossible rather than merely unlikely.
+**Libraries:** —
+
+### phase-03-videos/TD-09
+
+**Recommendation:** it is what the architecture diagram already specifies, it satisfies "sem necessidade de download completo" through native S3 `Range` support without writing any range code, and it covers the download bullet via a `content-disposition` override on the same primitive. Suggested expiry in the 15–60 min range, re-issued on demand. Option C is a legitimate future phase, not this one.
+**Libraries:** —
+
+### phase-03-videos/TD-10
+
+**Recommendation:** it maps one-to-one onto the required cycle, keeps the reflected state trivially queryable, and delegates retry to BullMQ (TD-03) so that only genuinely terminal failures are persisted as `failed`. Record the reason in `processing_error` so a failed video can be diagnosed without reading worker logs.
+**Libraries:** —
+
+### phase-03-videos/TD-11
+
+**Recommendation:** it is the convention this repository already runs on, and it is what the phase explicitly demands. Keep the layering rules from `nestjs-project/CLAUDE.md`: real-service tests are `*.integration-spec.ts`, pure logic (e.g. `ffprobe` JSON parsing, key derivation) stays in `*.spec.ts` with mocks, and full HTTP flows are `*.e2e-spec.ts`. Add per-suite bucket/queue cleanup mirroring the existing `cleanAllTables` helper.
+**Libraries:** —
+
+### phase-03-videos/TD-12
+
+**Recommendation:** it is the smallest change that solves the actual problem, and the "public endpoint" concept it introduces is exactly what production needs anyway (the value simply becomes the real S3 or CDN hostname). Option B moves the cost from code into per-machine environment setup, which is worse for a project whose stated contract is that everything runs in Compose. Option C is the right shape at scale but is disproportionate here. The decision must be recorded together with an explicit note that a `localhost`-based `S3_PUBLIC_ENDPOINT` in dev does **not** violate the `CLAUDE.md` Docker-host rule — that rule governs container-to-container configuration, while this value is a browser-facing URL.
+**Libraries:** —
+
+### phase-03-videos/TD-13
+
+**Recommendation:** the two options do not overlap, they cover different failure modes, and neither is sufficient alone. Option A cannot validate content type because the declaration is client-supplied; Option B cannot prevent the wasted transfer. Since TD-07 already runs `ffprobe` on every upload and TD-10 already defines a `failed` terminal state with `processing_error`, the verification half is close to free — the same "combining is dominant" reasoning the project applied in `openapi-docs-nestjs/TD-02`.
+**Libraries:** —
 
 ## Inherited Decisions Detail
 

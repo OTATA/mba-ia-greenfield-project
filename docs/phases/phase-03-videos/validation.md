@@ -2,59 +2,75 @@
 kind: phase
 name: phase-03-videos
 status: dirty
-issue_count: 16
+issue_count: 0
 sources_mtime:
   docs/phases/phase-03-videos/context.md: "2026-09-11T13:10:16+00:00"
   docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-11T13:02:31+00:00"
 issues:
   - id: AMB-1
-    status: open
+    status: resolved
     summary: "Streaming/download audience undefined — anonymous viewers or owner only?"
+    resolved_by: clarification
   - id: AMB-2
-    status: open
+    status: resolved
     summary: "Draft pre-registration required fields undefined; title boundary with Phase 04"
+    resolved_by: clarification
   - id: ICC-1
-    status: open
+    status: resolved
     summary: "TD-09 direct-from-storage streaming vs inherited strict-BFF single-origin posture"
+    resolved_by: clarification
   - id: OQ-1
-    status: open
+    status: resolved
     summary: "TD-01 pending — Object Storage Client Library"
+    resolved_by: phase-03-videos/TD-01
   - id: OQ-2
-    status: open
+    status: resolved
     summary: "TD-02 pending — Bucket Topology and Object Key Layout"
+    resolved_by: phase-03-videos/TD-02
   - id: OQ-3
-    status: open
+    status: resolved
     summary: "TD-03 pending — Background Processing Queue Technology"
+    resolved_by: phase-03-videos/TD-03
   - id: OQ-4
-    status: open
+    status: resolved
     summary: "TD-04 pending — 10GB Upload Protocol"
+    resolved_by: phase-03-videos/TD-04
   - id: OQ-5
-    status: open
+    status: resolved
     summary: "TD-05 pending — Draft Pre-registration and Upload-Completion Handshake"
+    resolved_by: phase-03-videos/TD-05
   - id: OQ-6
-    status: open
+    status: resolved
     summary: "TD-06 pending — Video Worker Process Topology"
+    resolved_by: phase-03-videos/TD-06
   - id: OQ-7
-    status: open
+    status: resolved
     summary: "TD-07 pending — FFmpeg Invocation for Metadata and Thumbnail"
+    resolved_by: phase-03-videos/TD-07
   - id: OQ-8
-    status: open
+    status: resolved
     summary: "TD-08 pending — Unique Public Video URL Identifier"
+    resolved_by: phase-03-videos/TD-08
   - id: OQ-9
-    status: open
+    status: resolved
     summary: "TD-09 pending — Playback Streaming and Download Delivery"
+    resolved_by: phase-03-videos/TD-09
   - id: OQ-10
-    status: open
+    status: resolved
     summary: "TD-10 pending — Video Status Lifecycle and Processing-Failure Policy"
+    resolved_by: phase-03-videos/TD-10
   - id: OQ-11
-    status: open
+    status: resolved
     summary: "TD-11 pending — Integration-Test Strategy for Storage and Queue"
+    resolved_by: phase-03-videos/TD-11
   - id: OQ-12
-    status: open
+    status: resolved
     summary: "TD-12 pending — Storage Endpoint Addressing for Presigned URLs"
+    resolved_by: phase-03-videos/TD-12
   - id: OQ-13
-    status: open
+    status: resolved
     summary: "TD-13 pending — Upload Admission Control (10GB ceiling + content types)"
+    resolved_by: phase-03-videos/TD-13
 advisories: []
 ---
 
@@ -62,69 +78,51 @@ advisories: []
 
 ## Findings
 
-**Change since the previous revision:** the two `MD-N` issues are gone. `/research` added TD-12 (storage endpoint addressing) and TD-13 (upload admission control) to the slice, so the decisions now *exist* — they are simply not yet made. Per Check 3's rule that a pending TD belongs in `OQ-N` and not `MD-N`, they moved to **OQ-12** and **OQ-13**. Issue count is unchanged at 16, but the composition shifted from `2 AMB + 2 MD + 1 ICC + 11 OQ` to `2 AMB + 1 ICC + 13 OQ`. Nothing left in the set now requires new research — every remaining issue is resolvable by `/plan-resolve`.
+All 16 issues from the previous revision were resolved by `/plan-resolve` on 2026-09-11. `status` is deliberately left at `dirty` — per the pipeline contract only `/plan-validate` computes the verdict, and it must re-run the checks against the now-decided TDs before declaring `clean`.
 
 ### Inconsistencies
 
 _None._
 
-Checked and clear:
-
-- All 13 TDs cite a `Capability:` that matches a `## Scope` bullet verbatim; `## Capability Coverage` shows 9/9 bullets covered with no `—` rows.
-- No decided TD contradicts a scope bullet — vacuously true, no TD is decided yet.
-- **Scope-Subsection orphan check does not fire.** Scope distribution is 7 × `Backend` + 6 × `Cross-layer`, zero `Scope: Frontend`. The check targets `Scope: Frontend` with no active UI scope; `Cross-layer` is explicitly exempt. TD-12 and TD-13 are both `Cross-layer`, so adding them did not introduce an orphan.
-- UI ↔ Scope inconsistency skipped — `## UI Inventory` absent.
-
 ### Ambiguities
 
-- **AMB-1** — Capability *"Download do vídeo pelo usuário"* (and, by extension, *"Reprodução via streaming (sem necessidade de download completo)"*) does not say **which** user. `docs/project-plan.md` § Visão Geral settles watching for anonymous users — "Usuários anônimos podem assistir livremente" — but is silent on downloading. TD-09 says the API "authorizes and returns a presigned URL" without deciding *who* is authorized, and TD-12 now inherits the same gap for the public endpoint it introduces. This drives the Authorization Matrix, whether the endpoints carry `@Public()`, and the presigned-URL TTL policy, so `/plan-build` cannot derive the SI without it. Explicit choice: decide whether streaming and download are (a) both anonymous, (b) both authenticated, or (c) streaming anonymous + download authenticated — and record it on TD-09.
-
-- **AMB-2** — Capability *"Pré-cadastro automático do vídeo como rascunho ao iniciar o upload"* does not state which fields the draft row carries at creation. The Phase 04 boundary is genuinely fuzzy: that phase owns *"Edição das informações do vídeo: título, descrição, categoria e thumbnail customizada"*, so it is unclear whether Phase 03 must accept a title at upload start, derive a provisional one from the filename, or leave it null until Phase 04. This fixes the `NOT NULL` constraints in the CreateVideos migration — expensive to reverse once shipped. Note TD-13 now requires the client to declare size and MIME at create-upload, which partially specifies that request but says nothing about the descriptive fields. Explicit choice: fix the minimum draft payload for Phase 03 and state which columns stay nullable until Phase 04.
+_None._
 
 ### Missing Decisions
 
-_None._ — both prior `MD-N` issues are closed by the arrival of TD-12 and TD-13. The uncovered-bullet sub-type finds no gaps (9/9 covered), and the error-response-format sub-type is satisfied by the inherited `phase-02-auth/TD-07` domain exception filter.
-
-The shared-types contract-sync sub-type (Decisão #29) does not fire: it requires `ui_in_scope ∈ {true, logic-only}`, and this phase is `ui_in_scope: false`.
+_None._
 
 ### Dependency Gaps
 
 _None._
 
-Every prerequisite is delivered by a prior phase and visible in `## Inherited Conventions` / `## Inherited Decisions Detail`: channels from Phase 02 (videos belong to a channel), the global JWT guard from Phase 02 (protected upload endpoints), namespaced `registerAs` config + Joi env validation from Phase 01 (the new storage/queue/endpoint variables TD-12 introduces), and the `{ statusCode, error, message }` contract from `phase-02-auth/TD-07`.
-
-Within-phase ordering is documented rather than implied, and the two new TDs strengthen this: TD-12 declares `Depends on: TD-04, TD-09`, and TD-13 declares `Depends on: TD-04, TD-05, TD-07, TD-10`.
-
 ### Inherited Constraint Conflicts
 
-- **ICC-1** — TD-09 (`Cross-layer`, Playback Streaming and Download Delivery) recommends the browser fetch video bytes **directly from object storage** via presigned GET, and TD-12 now builds on that by introducing a browser-reachable storage endpoint. The inherited frontend posture points the other way: `phase-02-auth-frontend/TD-01`'s recommendation states that *"the strict-BFF model in `next-frontend-config-base/TD-03` already nominates the Route Handler as the only NestJS caller"*, and that TD-03 is titled *"Strict BFF — single server-only `API_URL`"*. Under a strict single-origin BFF the browser talks only to the Next.js origin; TD-09 + TD-12 require a second browser-visible origin. The conflict is not clear-cut: `docs/diagrams/software-arch.mermaid` explicitly draws `Rel(frontend, storage, "Streams", "HTTPS")`, and strict-BFF is worded as constraining *NestJS* calls specifically rather than all egress. It still needs an explicit ruling before `/plan-build`, because it decides whether the phase exposes a storage origin at all — and TD-12 is entirely predicated on the answer. Explicit choice: either (a) affirm that strict-BFF governs API calls only and the storage origin is an accepted second origin (aligning with the C4 diagram, and keeping TD-12 meaningful), or (b) keep a single origin and revisit TD-09 toward an API-proxied range path — which would also collapse TD-12 to the upload leg only.
-
-> **Scope note (deviation from Check 5's literal wording, stated deliberately).** Check 5 is specified over *decided* current-scope TDs, and all 13 TDs here are still pending — read literally, this category would be empty. ICC-1 is nevertheless retained because the conflict is real and already documented, and because surfacing it only *after* TD-09 is decided would be strictly worse: `/plan-resolve` would ask the user to decide TD-09 blind to the inherited posture, and the next `/plan-validate` would then raise ICC-1 and force an extra resolve cycle. Raising it pre-decision lets the same resolve run settle TD-09 and ICC-1 together. The issue is raised against TD-09's `**Recommendation:**`, not against a decision.
+_None._
 
 ### Unresolved Open Questions
 
-All 13 TDs of this slice are `pending`. This is the expected state after `/research`; `/plan-resolve` is the stage that records decisions.
-
-- **OQ-1** — TD-01 pending — Object Storage Client Library. Resolution: fill the **Decision:** field of TD-01 in `docs/decisions/technical-decisions-phase-03-videos.md`, then re-run `/plan-validate 03`.
-- **OQ-2** — TD-02 pending — Bucket Topology and Object Key Layout. Resolution: as above.
-- **OQ-3** — TD-03 pending — Background Processing Queue Technology. Resolution: as above.
-- **OQ-4** — TD-04 pending — 10GB Upload Protocol. Resolution: as above.
-- **OQ-5** — TD-05 pending — Draft Pre-registration and Upload-Completion Handshake. Resolution: as above.
-- **OQ-6** — TD-06 pending — Video Worker Process Topology. Resolution: as above.
-- **OQ-7** — TD-07 pending — FFmpeg Invocation for Metadata Extraction and Thumbnail. Resolution: as above.
-- **OQ-8** — TD-08 pending — Unique Public Video URL Identifier. Resolution: as above.
-- **OQ-9** — TD-09 pending — Playback Streaming and Download Delivery. Resolution: as above; decide together with ICC-1 and AMB-1.
-- **OQ-10** — TD-10 pending — Video Status Lifecycle and Processing-Failure Policy. Resolution: as above.
-- **OQ-11** — TD-11 pending — Integration-Test Strategy for Storage and Queue. Resolution: as above.
-- **OQ-12** — TD-12 pending — Storage Endpoint Addressing for Presigned URLs. Resolution: as above; depends on how ICC-1 is ruled (option (b) there would narrow this TD to the upload leg).
-- **OQ-13** — TD-13 pending — Upload Admission Control (10GB ceiling + accepted content types). Resolution: as above.
+_None._
 
 ### UI Coverage Gaps
 
-_None._ — `## UI Inventory` is absent from context.md (`ui_in_scope: false`), so UIG-N is not a concept for this phase. Phase 03 delivers no screen; the enunciado places the video interface out of scope.
+_None._ — `## UI Inventory` absent from context.md (`ui_in_scope: false`); UIG-N is not a concept for this phase.
 
 ## Resolved Issues
 
-_No issues resolved yet._
-
-The two prior `MD-N` entries are intentionally **not** listed here: `/plan-resolve` never ran to completion (it aborted at its Step 2 MD-N gate), so nothing was ever marked `resolved`. They ceased to fire because this run re-evaluated the checks against a context.md that now contains TD-12 and TD-13 — the audit trail for that transition lives in the `## Findings` preamble above and in the git history of this file.
+- **AMB-1** _(resolved_by clarification)_ — Streaming/download audience settled: **streaming is anonymous, download requires authentication**. This honours the project plan's "Usuários anônimos podem assistir livremente" while treating download of the original file as a deliberate act requiring an account. Consequences for `/plan-build`: the playback endpoint carries `@Public()`, the download endpoint does not; the Authorization Matrix distinguishes the two; presigned TTLs may differ per audience.
+- **AMB-2** _(resolved_by clarification)_ — Minimum draft payload settled: Phase 03 writes `id`, `public_id`, `channel_id`, `status`, storage keys, the declared size/MIME (already required by TD-13), and a **`title` derived from the uploaded filename**. `description` and `category` stay nullable for Phase 04 to populate. Consequence for `/plan-build`: in the CreateVideos migration `title` is `NOT NULL`, `description` and `category` are nullable — no upload-time form is introduced, keeping Phase 04's ownership of video-info editing intact.
+- **ICC-1** _(resolved_by clarification)_ — Ruled in favour of option (a): **strict-BFF governs calls to the NestJS API; object storage is an accepted second origin.** This matches `docs/diagrams/software-arch.mermaid`, which already draws `Rel(frontend, storage, "Streams", "HTTPS")`, and reads `next-frontend-config-base/TD-03` as constraining NestJS callers rather than all browser egress. TD-09 therefore stands as written and TD-12 remains load-bearing. The deciding argument was the download capability: routing a 10GB download through Node is the same anti-pattern the enunciado bans for upload.
+- **OQ-1** _(resolved_by phase-03-videos/TD-01)_ — Object Storage Client Library → A (`@aws-sdk/client-s3` v3). Libraries: `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`.
+- **OQ-2** _(resolved_by phase-03-videos/TD-02)_ — Bucket Topology and Object Key Layout → B (two buckets: private `streamtube-videos`, public-read `streamtube-thumbnails`).
+- **OQ-3** _(resolved_by phase-03-videos/TD-03)_ — Background Processing Queue Technology → A (BullMQ + Redis via `@nestjs/bullmq`). Libraries: `bullmq`, `@nestjs/bullmq`, `ioredis`. This settles the `TBD` the C4 diagram carried for the Message Queue container.
+- **OQ-4** _(resolved_by phase-03-videos/TD-04)_ — 10GB Upload Protocol → C (presigned multipart brokered by the API).
+- **OQ-5** _(resolved_by phase-03-videos/TD-05)_ — Draft Pre-registration and Upload-Completion Handshake → A (API-brokered completion, plus a low-frequency janitor sweep for abandoned uploads).
+- **OQ-6** _(resolved_by phase-03-videos/TD-06)_ — Video Worker Process Topology → A (separate container, shared codebase, `NestFactory.createApplicationContext()` entrypoint, dedicated `Dockerfile.worker` carrying FFmpeg).
+- **OQ-7** _(resolved_by phase-03-videos/TD-07)_ — FFmpeg Invocation → B (direct `child_process` spawn of `ffmpeg` / `ffprobe`), avoiding the deprecated `fluent-ffmpeg`.
+- **OQ-8** _(resolved_by phase-03-videos/TD-08)_ — Unique Public Video URL Identifier → C (dedicated short `public_id` from `node:crypto`, no new dependency).
+- **OQ-9** _(resolved_by phase-03-videos/TD-09)_ — Playback Streaming and Download Delivery → B (short-lived presigned `GET`; storage serves `206` natively).
+- **OQ-10** _(resolved_by phase-03-videos/TD-10)_ — Video Status Lifecycle → A (single enum `draft → uploading → processing → ready | failed` plus `processing_error`; retry delegated to BullMQ `attempts`).
+- **OQ-11** _(resolved_by phase-03-videos/TD-11)_ — Integration-Test Strategy → A (real MinIO and Redis from Compose, matching the existing Postgres/Mailpit convention).
+- **OQ-12** _(resolved_by phase-03-videos/TD-12)_ — Storage Endpoint Addressing → A (two endpoints, two clients: `S3_INTERNAL_ENDPOINT` for server-side work, `S3_PUBLIC_ENDPOINT` used only for signing browser-facing URLs; a `localhost`-based public value in dev does **not** violate the `CLAUDE.md` Docker-host rule).
+- **OQ-13** _(resolved_by phase-03-videos/TD-13)_ — Upload Admission Control → C (both mechanisms: declare-then-bind at create-upload with `signableHeaders` content-length, plus post-completion `HeadObject` + `ffprobe` verification feeding TD-10's `failed` state).
