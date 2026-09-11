@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 1/9 completed
+**SIs:** 2/9 completed
 
 ### SI-03.1 — Infra: storage, fila e worker no Compose
 - **Status:** completed
@@ -13,9 +13,14 @@
   - Verificado na subida: bucket `streamtube-thumbnails` com policy `download` (leitura pública) e `streamtube-videos` com policy `private`; `ffmpeg`/`ffprobe` presentes só na imagem do worker e ausentes na imagem da API.
 
 ### SI-03.2 — Entidade Video e migration
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 13 passing
+- **Observations:**
+  - Migration gerada pela CLI (`migration:generate`), não escrita à mão, conforme `.claude/rules/typeorm-migrations.md`. O `down()` gerado já remove o tipo enum, que é exatamente o comportamento exigido pelo bugfix de re-execução da suíte.
+  - `created_at`/`updated_at` saíram como `TIMESTAMP` (sem timezone), não `timestamptz` como o Data Model do plano dizia. Mantive assim para ficar consistente com as quatro tabelas que já existem (users, channels, refresh_tokens, verification_tokens) — misturar os dois tipos no mesmo schema seria pior. O plano não marcou esse ponto como load-bearing, ao contrário do `bigint`.
+  - `declared_size_bytes` usa transformer bigint→number: o Postgres devolve bigint como string para não perder precisão, mas 10GB (10737418240) cabe folgado em `Number.MAX_SAFE_INTEGER`, então a conversão é lossless e poupa parse em todo chamador.
+  - `cleanAllTables` ganhou `DELETE FROM "videos"`. É helper compartilhado; sem isso as suítes seguintes herdariam limpeza incompleta.
+  - `Channel` ganhou o lado inverso `@OneToMany(() => Video)` para a relação ficar bidirecional conforme a convenção TypeORM do projeto.
 
 ### SI-03.3 — StorageService com endpoint duplo e assinatura de URLs
 - **Status:** pending
