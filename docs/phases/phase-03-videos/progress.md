@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/9 completed
+**SIs:** 3/9 completed
 
 ### SI-03.1 — Infra: storage, fila e worker no Compose
 - **Status:** completed
@@ -23,9 +23,13 @@
   - `Channel` ganhou o lado inverso `@OneToMany(() => Video)` para a relação ficar bidirecional conforme a convenção TypeORM do projeto.
 
 ### SI-03.3 — StorageService com endpoint duplo e assinatura de URLs
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 26 passing (suíte completa: 189 passing, 27 suites)
+- **Observations:**
+  - Primeira rodada falhou com `ECONNREFUSED 127.0.0.1:9000` em 7 testes: o spec roda dentro do container e as URLs assinadas apontam para `S3_PUBLIC_ENDPOINT=localhost:9000`, que dentro do container é o próprio container. Resolvido com `src/test/setup-test-env.ts` como `setupFile` do Jest (nos dois configs), apontando o endpoint público para o interno sob teste — exatamente o que o TD-12 já prescrevia.
+  - Como isso colapsa os dois endpoints no mesmo host durante os testes, a asserção original "host público ≠ host interno" viraria vacuosa. Substituída por um teste que constrói um `StorageService` com dois endpoints genuinamente distintos e inspeciona a URL **sem** dereferenciá-la — prova o wiring dos dois clients sem precisar que o host público seja alcançável.
+  - Regressão encontrada na suíte completa: `Entity metadata for Channel#videos was not found`. A relação inversa que adicionei no SI-03.2 exige que `Video` esteja registrada em toda DataSource que registra `Channel`, o que só acontece quando o VideosModule chamar `forFeature` no SI-03.4. Deixei a relação **unidirecional** por ora (só o lado dono, em `Video`), com comentário no código. **Pendência para o SI-03.4: restaurar `Channel.videos` e o seletor inverso.** Isso desvia temporariamente da regra "sempre definir os dois lados" de `.claude/rules/nestjs-entities.md`.
+  - Os pacotes AWS SDK instalados (3.1130.0) não introduziram nenhum advisory. O `npm audit` acusa 1 critical em `liquidjs`, dependência transitiva pré-existente — fora do escopo desta fase.
 
 ### SI-03.4 — Fila de processamento e VideosModule
 - **Status:** pending
