@@ -14,6 +14,13 @@ const MANAGED_TABLES = [
   'verification_tokens',
 ];
 
+// PostgreSQL enum types survive `DROP TABLE ... CASCADE` — they are schema
+// objects in their own right. Dropping only the tables would leave the type
+// behind, and the next `runMigrations()` would fail on `CREATE TYPE` with
+// "type already exists". Every enum type created by a migration must be listed
+// here so the suite is re-runnable against an already-migrated database.
+const MANAGED_ENUM_TYPES = ['verification_tokens_type_enum'];
+
 describe('Database migrations (integration)', () => {
   let dataSource: DataSource;
 
@@ -31,12 +38,21 @@ describe('Database migrations (integration)', () => {
 
     await dataSource.initialize();
 
-    await Promise.all([
-      ...MANAGED_TABLES.map((table) =>
-        dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`),
-      ),
-      dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
-    ]);
+    // One statement per object kind, never `Promise.all`: concurrent
+    // `DROP TABLE ... CASCADE` on FK-related tables runs in separate pool
+    // connections and deadlocks (dropping `users` CASCADE must remove the FK
+    // that the concurrent `channels` drop already locked). A single DROP takes
+    // every lock atomically.
+    const tablesToDrop = [...MANAGED_TABLES, 'migrations']
+      .map((table) => `"${table}"`)
+      .join(', ');
+    await dataSource.query(`DROP TABLE IF EXISTS ${tablesToDrop} CASCADE`);
+
+    // Runs after the tables so no column still depends on the type.
+    const typesToDrop = MANAGED_ENUM_TYPES.map(
+      (type) => `"public"."${type}"`,
+    ).join(', ');
+    await dataSource.query(`DROP TYPE IF EXISTS ${typesToDrop} CASCADE`);
   });
 
   afterAll(async () => {
