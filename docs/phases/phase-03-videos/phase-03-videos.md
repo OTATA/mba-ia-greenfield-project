@@ -139,7 +139,7 @@ Deliver large-file video upload without blocking the system — object storage p
 ### SI-03.5 — Endpoint POST /videos — rascunho e upload multipart pré-assinado
 
 **Route:** POST /videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-create-upload.plan.md`
 **Authorization:** Authenticated (cria no canal do próprio usuário) — per `### Authorization Matrix`
 
 **Description:** Abre o upload: valida a admissão, pré-cadastra o vídeo como rascunho e devolve as URLs pré-assinadas por parte, de modo que os bytes nunca passem pela API.
@@ -179,7 +179,7 @@ Os cenários E2E de comportamento deste endpoint são autorados por `/plan-test-
 ### SI-03.6 — Endpoint POST /videos/:publicId/complete — handshake e enfileiramento
 
 **Route:** POST /videos/:publicId/complete
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-complete-upload.plan.md`
 **Authorization:** Owner (canal do vídeo) — per `### Authorization Matrix`
 
 **Description:** Fecha o multipart pela API — e é justamente essa chamada que serve de sinal de conclusão, movendo o vídeo para `processing` e enfileirando o job no mesmo request.
@@ -217,7 +217,7 @@ Os cenários E2E de comportamento são autorados por `/plan-test-specs` no spec 
 ### SI-03.7 — Endpoints de leitura — metadados, streaming e download
 
 **Route:** GET /videos/:publicId · GET /videos/:publicId/stream · GET /videos/:publicId/download
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-playback.plan.md`
 **Authorization:** metadados e stream anônimos quando `ready`; download exige autenticação — per `### Authorization Matrix` (resolução AMB-1)
 
 **Description:** Resolve a URL única do vídeo e entrega playback e download por URL pré-assinada de vida curta, deixando o `Range`/`206` a cargo do storage.
