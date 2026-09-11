@@ -13,7 +13,9 @@ _Subprojects in scope:_
 - `nestjs-project/` — backend that delivers the videos module (draft pre-registration, presigned upload brokering, completion handshake, playback/download URL issuing), the video worker process (FFmpeg metadata + thumbnail), and the new Compose infrastructure (object storage, queue broker, worker).
 - `next-frontend/` — **No open decision in this document.** The video interface is explicitly out of scope for Phase 03; the phase's capability bullets contain no screen. The four `Cross-layer` TDs below (TD-04, TD-05, TD-08, TD-09) nevertheless fix the client↔server contract now — upload handshake, completion call, public URL shape, and playback/download delivery — so that the frontend phase consumes a settled contract instead of reopening it.
 
-> **Tooling note — `context7` MCP is not configured in this repository.** `CLAUDE.md` mandates library documentation lookup via `context7`, but `.mcp.json` declares only `postgres` (and `figma` in `.mcp.json.example`); `context7` has never been present in the repo's git history. Library facts in this document were therefore sourced from the **npm registry API** (versions, `engines`, `peerDependencies`, module type, deprecation flags — queried 2026-09-11) and **official vendor documentation** (AWS S3 User Guide, MinIO docs). Every version claim below is traceable to one of those. This gap should be closed before `/plan-resolve` produces `library-refs.md`.
+> **Tooling note — `context7` MCP is not configured in this repository.** `CLAUDE.md` mandates library documentation lookup via `context7`, but `.mcp.json` declares only `postgres` (and `figma` in `.mcp.json.example`); `context7` has never been present in the repo's git history. Library facts in this document were therefore sourced from the **npm registry API** (versions, `engines`, `peerDependencies`, module type, deprecation flags — queried 2026-09-11) and **official vendor documentation** (AWS S3 User Guide, MinIO docs). Every version claim below is traceable to one of those.
+
+**Substitution decided by the user on 2026-09-11:** rather than adding `context7` to `.mcp.json`, this project sources library documentation from the npm registry API plus official vendor docs, and records the substitution in the artifact. This applies downstream too — `/plan-resolve` Step 5 nominally calls `context7` to build `library-refs.md`; that file will instead be built from the same sources and will carry the same provenance note. The registry API supplies exactly the fields a version decision turns on (`dist-tags.latest`, publish date, `engines`, `peerDependencies`, `type`, and the `deprecated` flag), and it has already caught two things stale model knowledge would have missed: `fluent-ffmpeg`'s deprecation (TD-07) and the ESM-only migration of `pg-boss@12` / `nanoid@6` (TD-03, TD-08).
 
 **Verified stack baseline (2026-09-11):** NestJS 11 · TypeScript 5.9.3 · Node 25.6.0 · PostgreSQL 17 · TypeORM 0.3.28 · CommonJS output (`module: nodenext`, no `"type": "module"`).
 
@@ -364,6 +366,80 @@ _Subprojects in scope:_
 
 ---
 
+## TD-12: Storage Endpoint Addressing for Presigned URLs
+
+**Scope:** Cross-layer
+
+**Capability:** Transversal — covers: "Serviço de armazenamento de arquivos (vídeos e thumbnails)", "Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance", "Reprodução via streaming (sem necessidade de download completo)", "Download do vídeo pelo usuário"
+
+**Context:** Raised as `MD-1` by `plan-validate`. TD-04 (presigned multipart upload) and TD-09 (presigned GET playback/download) both hand the client a URL it must fetch itself, so the client needs an address it can actually reach. The API and the worker, meanwhile, talk to storage from inside the Compose network. This TD decides how one storage service is addressed from two vantage points.
+
+**Decisive fact:** SigV4 **signs the `Host` header**, so a presigned URL is only valid at the exact host it was signed for — the host cannot be rewritten afterward without invalidating the signature. The root `CLAUDE.md` mandates the Compose service name as host, which would sign against `minio:9000`; no browser and no host-side process can resolve that name. Conversely, signing everything against a public host breaks nothing for the browser but is wrong for in-network calls. This is a genuine two-audience problem, not a configuration slip.
+
+**Direction already fixed:** `ICC-1` was resolved toward **Path A — presigned direct** (the API returns a presigned URL in the response body; the browser fetches bytes from storage). `software-arch.mermaid` already draws `Rel(frontend, storage, "Streams", "HTTPS")`. This TD therefore decides *how* to address storage, not *whether* to expose it.
+
+**Options:**
+
+### Option A: Two endpoints, two clients (`S3_INTERNAL_ENDPOINT` + `S3_PUBLIC_ENDPOINT`)
+- `S3_INTERNAL_ENDPOINT=http://minio:9000` backs the client used for real operations (worker reads, `CompleteMultipartUpload`, `HeadObject`); `S3_PUBLIC_ENDPOINT` backs a second client used **only** by the presigner.
+- **Pros:** One extra env var and one extra `S3Client`; no new infrastructure. Maps 1:1 onto production, where the public endpoint simply becomes the S3/CDN hostname. Tests set public = internal so in-container e2e can genuinely fetch a signed URL (satisfies TD-11). Explicit and greppable — the two audiences are visible in the config.
+- **Cons:** In dev the public value is `localhost`-based, which *looks* like a violation of the `CLAUDE.md` Docker-host rule and invites a well-meaning "fix" that silently breaks playback — so the distinction must be written down, not just known. Two clients to wire correctly; using the wrong one is a quiet bug.
+
+### Option B: One hostname resolvable from both sides
+- Choose a single name (a `localtest.me` subdomain, or a `/etc/hosts` entry) and give MinIO that alias on the Compose network, so the same host resolves inside and outside the network. One endpoint value everywhere; signatures always valid.
+- **Pros:** No dual-client wiring and no dual-endpoint concept — one value, one code path. The signature question disappears entirely.
+- **Cons:** Requires host-machine setup outside Compose, breaking "clone and `docker compose up`". Behaviour varies across developer OSes and needs the same trick reproduced in CI. Trades a small code cost for an environment-setup cost that is harder to document and easier to get wrong.
+
+### Option C: Reverse proxy fronting MinIO on a single origin
+- Add nginx/traefik to Compose so the browser reaches both the API and storage through one origin (e.g. `/s3/*` routed to MinIO), and sign against the proxy host.
+- **Pros:** A single browser-visible origin, which also satisfies the inherited strict-BFF posture most literally and sidesteps CORS. Closest to a production topology with a CDN in front of storage.
+- **Cons:** A fourth new container in a phase already adding storage, queue and worker. The proxy sits on the byte path, partially reintroducing the throughput concern Path A was chosen to avoid (nginx handles it far better than Node, but it is no longer a direct path). More moving parts to debug for a benefit this phase does not need.
+
+**Recommendation:** **Option A (two endpoints, two clients)** — it is the smallest change that solves the actual problem, and the "public endpoint" concept it introduces is exactly what production needs anyway (the value simply becomes the real S3 or CDN hostname). Option B moves the cost from code into per-machine environment setup, which is worse for a project whose stated contract is that everything runs in Compose. Option C is the right shape at scale but is disproportionate here. The decision must be recorded together with an explicit note that a `localhost`-based `S3_PUBLIC_ENDPOINT` in dev does **not** violate the `CLAUDE.md` Docker-host rule — that rule governs container-to-container configuration, while this value is a browser-facing URL.
+
+**Consequence (not a separate TD):** browser-direct access requires CORS on the storage side. MinIO defaults `MINIO_API_CORS_ALLOW_ORIGIN` to `*`, so dev works untouched; tightening it for production is configuration, resolved at implementation time.
+
+**Depends on:** TD-04 (presigned multipart) and TD-09 (presigned GET). Had `ICC-1` been resolved toward an API-proxied range path, this TD would have narrowed to the upload leg only.
+
+**Decision:** _[pending]_
+
+---
+
+## TD-13: Upload Admission Control — 10GB Ceiling and Accepted Content Types
+
+**Scope:** Cross-layer
+
+**Capability:** Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance
+
+**Context:** Raised as `MD-2` by `plan-validate`. The capability states a hard ceiling of 10GB, and the platform only accepts video. TD-04 deliberately keeps the bytes out of the API, so the limit cannot be enforced by inspecting the stream — the enforcement point has to be chosen explicitly, and it shapes the request contract for the create-upload endpoint.
+
+**Decisive fact (corrects the resolution hint in `validation.md`):** S3's `content-length-range` condition belongs to the **POST policy** used by browser form uploads. It is **not available for presigned `PUT` / `UploadPart` URLs**, which carry no policy document. The obvious-sounding answer therefore does not apply to the multipart flow TD-04 selected. What *is* available: AWS SDK v3's `getSignedUrl` accepts `signableHeaders: new Set(['content-length'])`, binding a presigned URL's signature to one exact byte count.
+
+**Options:**
+
+### Option A: Declare-then-bind at create-upload
+- The client declares total size and MIME type when starting the upload. The API rejects anything over 10GB up front, computes a part plan (N parts of a fixed size), and signs exactly N `UploadPart` URLs, each bound to its exact `Content-Length` via `signableHeaders`. The client cannot exceed the plan: unplanned parts have no signature, and oversized parts fail signature validation at storage.
+- **Pros:** Enforced by the signature itself, at the storage boundary, before a single byte is written. Total size is bounded by construction (the sum of the signed part lengths). The user learns immediately that the file is too large, instead of after a long upload. Uses a documented SDK feature rather than custom policing.
+- **Cons:** The client must know the exact size up front (fine for a file picker) and chunk exactly as planned — a rigid contract that needs re-planning if part sizes change. Crucially, the MIME type at this stage is only *declared* by the client, so this option cannot tell a real MP4 from a renamed archive.
+
+### Option B: Post-completion verification in the worker
+- Accept the upload, then verify after `CompleteMultipartUpload`: `HeadObject` for the true byte count and the `ffprobe` pass from TD-07 for the true container and codecs. Anything over the cap or not actually a video is deleted and the row moves to `failed` per TD-10.
+- **Pros:** Verifies the **actual bytes** rather than the client's claims — the only way to establish the real media type. Reuses machinery the phase already has: TD-07's `ffprobe` call and TD-10's `failed` state plus `processing_error`. Imposes no rigid part plan on the client.
+- **Cons:** An abusive 10GB upload completes, is paid for in bandwidth and storage, and is only then rejected. Feedback is asynchronous, so the user sees a failure minutes later. Requires a delete/cleanup path.
+
+### Option C: Both — A as admission control, B as verification
+- Option A bounds what can be uploaded; Option B confirms what actually arrived.
+- **Pros:** A stops the cheap, obvious abuse before any transfer; B catches the client that declares `video/mp4` and uploads something else. The marginal cost over B alone is small because `ffprobe` already runs for TD-07, so B contributes one size check and one reject path. Defense in depth at the two points where each check is actually possible.
+- **Cons:** Two mechanisms to implement and test rather than one.
+
+**Recommendation:** **Option C (both)** — the two options do not overlap, they cover different failure modes, and neither is sufficient alone. Option A cannot validate content type because the declaration is client-supplied; Option B cannot prevent the wasted transfer. Since TD-07 already runs `ffprobe` on every upload and TD-10 already defines a `failed` terminal state with `processing_error`, the verification half is close to free — the same "combining is dominant" reasoning the project applied in `openapi-docs-nestjs/TD-02`.
+
+**Depends on:** TD-04 (defines the part plan being signed), TD-05 (API-brokered completion is where verification is triggered), TD-07 (`ffprobe` supplies the real media type), TD-10 (`failed` + `processing_error` is the reject path).
+
+**Decision:** _[pending]_
+
+---
+
 ## Decisions Summary
 
 | ID | Scope | Decision | Recommendation | Choice |
@@ -379,6 +455,8 @@ _Subprojects in scope:_
 | TD-09 | Cross-layer | Playback Streaming and Download Delivery | Short-lived presigned `GET` | _[pending]_ |
 | TD-10 | Backend | Video Status Lifecycle and Failure Policy | Single enum + `processing_error` | _[pending]_ |
 | TD-11 | Backend | Integration-Test Strategy for Storage and Queue | Real MinIO + Redis from Compose | _[pending]_ |
+| TD-12 | Cross-layer | Storage Endpoint Addressing for Presigned URLs | Two endpoints, two clients | _[pending]_ |
+| TD-13 | Cross-layer | Upload Admission Control (10GB ceiling + content types) | Both — declare-then-bind + post-completion verification | _[pending]_ |
 
 ## Sources
 
@@ -388,3 +466,11 @@ Version, module-format, engine and deprecation facts were read from the npm regi
 - [Amazon S3 — Multipart upload limits](https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html)
 - [MinIO — Bucket notification targets and events](https://docs.min.io/enterprise/aistor-object-store/administration/bucket-notifications/)
 - [fluent-ffmpeg — repository (archived)](https://github.com/fluent-ffmpeg/node-fluent-ffmpeg) and [Phasing out fluent-ffmpeg (issue #1324)](https://github.com/fluent-ffmpeg/node-fluent-ffmpeg/issues/1324)
+
+Added for TD-12 / TD-13 (2026-09-11):
+
+- [Amazon S3 — Creating a POST policy (`content-length-range` is POST-policy only)](https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-HTTPPOSTConstructPolicy.html)
+- [`@aws-sdk/s3-request-presigner` — `signableHeaders` usage](https://github.com/aws/aws-sdk-js-v3/blob/main/packages/s3-request-presigner/README.md)
+- [aws-sdk-js — Limit the size of file upload with presigned urls (issue #1252)](https://github.com/aws/aws-sdk-js/issues/1252)
+- [MinIO — CORS configuration (`MINIO_API_CORS_ALLOW_ORIGIN` defaults to `*`)](https://docs.min.io/aistor/administration/cors-configuration/)
+- [Solving presigned URL issues in dockerized development with MinIO](https://medium.com/@codyalexanderraymond/solving-presigned-url-issues-in-dockerized-development-with-minio-internal-dns-61a8b7c7c0ce) — corroborates the SigV4 host-signing constraint behind TD-12.
