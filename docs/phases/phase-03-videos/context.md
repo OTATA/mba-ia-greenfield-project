@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-09-11T10:26:34+00:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-11T12:36:54+00:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-11T13:02:31+00:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-09-11T10:26:34+00:00"
   docs/phases/phase-01-configuracao-base/context.md: "2026-09-11T10:26:34+00:00"
   docs/phases/phase-02-auth/context.md: "2026-09-11T10:26:34+00:00"
@@ -29,20 +29,22 @@ sources_mtime:
 - Reprodução via streaming (sem necessidade de download completo)
 - Download do vídeo pelo usuário
 
+Phase lead sentence (verbatim): "Upload de arquivos grandes sem travar o sistema, processamento automático do vídeo e geração de URL única."
+
 **Out of scope:** _Not specified in `docs/project-plan.md`._
 
 **Deliverables:** upload de até 10GB funcional, processamento automático do vídeo, streaming funcionando, URLs únicas geradas.
 
-**Affected subprojects:** _None explicitly named in the phase block_ — it describes capabilities only, naming no subproject paths.
+**Affected subprojects:** _No subproject paths are named in the Phase 03 block_ — the plan does not attribute these capabilities to `nestjs-project` or `next-frontend` at this level.
 
 **Deferred subprojects:** _None declared in the phase block._
 
-**Sequencing notes:** `> Depende de: Fase 01, Fase 02`. Phase intro line: "Upload de arquivos grandes sem travar o sistema, processamento automático do vídeo e geração de URL única."
+**Sequencing notes:** `> Depende de: Fase 01, Fase 02`.
 
 **Neighbors (for boundary detection only):**
 
-- **Phase 02:** Cadastro, Login e Gerenciamento de Conta (`> Depende de: Fase 01`)
-- **Phase 04:** Gerenciamento de Vídeos e Canal (`> Depende de: Fase 02, Fase 03`)
+- **Phase 02:** Cadastro, Login e Gerenciamento de Conta — depende de: Fase 01.
+- **Phase 04:** Gerenciamento de Vídeos e Canal — depende de: Fase 02, Fase 03.
 
 ## Decisions Index
 
@@ -59,8 +61,10 @@ sources_mtime:
 | phase-03-videos/TD-09 | phase | Cross-layer | Playback Streaming and Download Delivery | pending | — | — |
 | phase-03-videos/TD-10 | phase | Backend | Video Status Lifecycle and Processing-Failure Policy | pending | — | — |
 | phase-03-videos/TD-11 | phase | Backend | Integration-Test Strategy for Storage and Queue | pending | — | — |
+| phase-03-videos/TD-12 | phase | Cross-layer | Storage Endpoint Addressing for Presigned URLs | pending | — | — |
+| phase-03-videos/TD-13 | phase | Cross-layer | Upload Admission Control — 10GB Ceiling and Accepted Content Types | pending | — | — |
 
-`Renders in` column omitted: no TD in the kept set sets the field explicitly (all `—`).
+`Renders in` column omitted: no TD in scope sets the field (all `—`).
 
 _Source files:_
 
@@ -70,19 +74,19 @@ _Source files:_
 
 | Capability (from project-plan.md) | Covered by |
 |-----------------------------------|------------|
-| Serviço de armazenamento de arquivos (vídeos e thumbnails) | phase-03-videos/TD-01, phase-03-videos/TD-02, phase-03-videos/TD-11 |
+| Serviço de armazenamento de arquivos (vídeos e thumbnails) | phase-03-videos/TD-01, phase-03-videos/TD-02, phase-03-videos/TD-11, phase-03-videos/TD-12 |
 | Serviço de processamento em segundo plano (filas) | phase-03-videos/TD-03, phase-03-videos/TD-06, phase-03-videos/TD-11 |
-| Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance | phase-03-videos/TD-04 |
+| Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance | phase-03-videos/TD-04, phase-03-videos/TD-12, phase-03-videos/TD-13 |
 | Pré-cadastro automático do vídeo como rascunho ao iniciar o upload | phase-03-videos/TD-05, phase-03-videos/TD-10 |
 | Processamento automático do vídeo após upload (extração de duração e metadados) | phase-03-videos/TD-05, phase-03-videos/TD-07, phase-03-videos/TD-10 |
 | Geração automática de thumbnail a partir de um frame do vídeo | phase-03-videos/TD-07 |
 | URL única por vídeo, sem conflito com outros vídeos | phase-03-videos/TD-08 |
-| Reprodução via streaming (sem necessidade de download completo) | phase-03-videos/TD-09 |
-| Download do vídeo pelo usuário | phase-03-videos/TD-09 |
+| Reprodução via streaming (sem necessidade de download completo) | phase-03-videos/TD-09, phase-03-videos/TD-12 |
+| Download do vídeo pelo usuário | phase-03-videos/TD-09, phase-03-videos/TD-12 |
 
 ## Decisions Detail
 
-_No decided TDs yet — all 11 TDs of this slice are `pending`. `/plan-resolve` populates this section once decisions are recorded._
+_No decided TDs yet — all 13 TDs of this slice are `pending`. `/plan-resolve` populates this section once decisions are recorded._
 
 ## Inherited Decisions Detail
 
@@ -217,7 +221,7 @@ _No decided TDs yet — all 11 TDs of this slice are `pending`. `/plan-resolve` 
 - Database connection parameters (host, port, etc.) are sourced from a single `databaseConfig` factory — never duplicated between `AppModule` and `data-source.ts`. _(from phase 01)_
 - `TypeOrmModule.forRootAsync` is used (not `forRoot`), with `imports: [ConfigModule]`, `inject: [databaseConfig.KEY]`, `useFactory` returning options including `autoLoadEntities: true`, `synchronize: false`. _(from phase 01)_
 
-_(Phase 01's own context.md records `_No inherited conventions — this is the first phase._`; the `phase-02-auth-frontend` slice records `_No inherited conventions from prior phases._` — nothing to union from either.)_
+_(Phase 01 declares no inheritable conventions of its own — the bullets above are its conventions as carried forward by `phase-02-auth`. Slice `phase-02-auth-frontend` contributes none.)_
 
 ## Inherited Deferred Capabilities
 
