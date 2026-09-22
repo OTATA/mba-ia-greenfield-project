@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 8/9 completed
+**Status:** completed
+**SIs:** 9/9 completed
 
 ### SI-03.1 — Infra: storage, fila e worker no Compose
 - **Status:** completed
@@ -95,6 +95,12 @@
   - Risco registrado no CLAUDE.md: **não deixar o worker rodando durante a suíte e2e.** O e2e assevera que um upload concluído fica em `processing`; um worker vivo vira a linha para `ready` e corre com a asserção.
 
 ### SI-03.9 — Faxina de uploads abandonados
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 6 novos (5 integration da faxina, 1 integration de roteamento no processor). Suíte completa: API 254 passing / 33 suites, e2e 71 passing / 6 suites, worker 6 passing / 1 suite.
+- **Observations:**
+  - **Mudança de API no BullMQ 6, pega pelo `tsc`:** `repeat` deixou de existir em `JobsOptions`; job repetível agora é `queue.upsertJobScheduler(id, repeatOpts, template)`. Melhor para o caso: o "upsert" já dá a idempotência que eu tentava obter com `jobId` fixo — reiniciar a API redeclara o mesmo schedule em vez de empilhar outro, e mudar o intervalo substitui a entrada em vez de deixar as duas rodando.
+  - **Uma fila carrega dois tipos de job**, então o `process()` do processor passou a rotear por `job.name`. Isso tinha um risco silencioso: o payload da faxina é `{}`, e o código lia `job.data.videoId` incondicionalmente — sem o roteamento, a faxina operaria sobre `undefined`. O `@OnWorkerEvent('failed')` ganhou a mesma guarda, senão uma varredura falha tentaria marcar como `failed` um vídeo inexistente. Há teste de integração específico para o roteamento, porque se o nome não bater a faxina simplesmente nunca roda e **nada no sistema percebe**.
+  - Na faxina, o abort no storage vem **antes** da escrita no banco: assim que a linha deixa de dizer `uploading`, ninguém mais olha para aquele `upload_id`, então falhar o abort depois orfanaria as partes para sempre. A falha do abort é logada e engolida, não propagada — um upload inalcançável não pode impedir a varredura de reclamar os demais. Há teste cobrindo exatamente isso (abortar duas vezes).
+  - `sweep(ttlMs)` recebe o TTL por parâmetro para o teste exercitar a fronteira sem esperar 24h. O TTL padrão é generoso de propósito: a janela precisa acomodar um upload de 10GB em conexão lenta, e reclamar cedo demais abortaria uploads legítimos em voo — muito pior do que deixar um morto por mais algumas horas.
+  - **A ação técnica #3 não era realizável como escrita.** O plano pede a regra de ciclo de vida `AbortIncompleteMultipartUpload` no bucket, mas o `mc ilm rule add` não tem flag para ela — é vocabulário de lifecycle do S3. O MinIO implementa a mesma intenção como config de servidor, e já vem ligada: `api.stale_uploads_expiry=24h` e `api.stale_uploads_cleanup_interval=6h` (verificado com `mc admin config get local api`). Documentado no `compose.yaml` com a nota de que, ao migrar para S3 real, a regra de lifecycle é o mecanismo correto.
+  - `testPathIgnorePatterns` foi estreitado para excluir **apenas** o spec do processor. O spec da faxina toca MinIO e Postgres mas não o ffmpeg, então roda na suíte normal da API — não havia razão para exilá-lo no container do worker.

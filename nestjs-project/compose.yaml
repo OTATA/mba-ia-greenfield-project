@@ -75,6 +75,21 @@ services:
 
   # One-shot: creates the two buckets and makes only the thumbnails bucket
   # world-readable. Videos stay private and are reached via presigned GET.
+  # Storage-side counterpart to the upload janitor.
+  #
+  # The janitor reclaims *rows* stuck in `uploading`; the parts those uploads
+  # already pushed are storage's problem. On real S3 that is the
+  # `AbortIncompleteMultipartUpload` bucket lifecycle rule. MinIO does not
+  # express it as a lifecycle rule — `mc ilm rule add` has no flag for it —
+  # and instead cleans stale multipart uploads through server settings, which
+  # ship enabled by default:
+  #
+  #   api.stale_uploads_expiry=24h
+  #   api.stale_uploads_cleanup_interval=6h
+  #
+  # (verified with `mc admin config get local api`). They are deliberately not
+  # overridden here: the defaults already match the janitor's own TTL. When
+  # this moves to real S3, add the lifecycle rule to the bucket instead.
   minio-init:
     image: minio/mc
     depends_on:

@@ -26,6 +26,7 @@ import {
 } from '../videos.constants';
 import { FfmpegService } from './ffmpeg.service';
 import { ProcessRunner } from './process-runner';
+import { UploadJanitorService } from './upload-janitor.service';
 import { VideoProcessingProcessor } from './video-processing.processor';
 import type { VideoProcessJob } from '../videos.service';
 
@@ -78,6 +79,7 @@ describe('VideoProcessingProcessor (integration)', () => {
         FfmpegService,
         ProcessRunner,
         StorageService,
+        UploadJanitorService,
       ],
     }).compile();
 
@@ -161,18 +163,19 @@ describe('VideoProcessingProcessor (integration)', () => {
     return await videoRepository.findOneByOrFail({ id: video.id });
   }
 
-  /** Waits for the worker to move the row out of `processing`. */
+  /** Waits for the worker to move the row out of the status it started in. */
   async function waitForSettled(
     videoId: string,
+    from: VideoStatus = VideoStatus.PROCESSING,
     timeoutMs = 30_000,
   ): Promise<Video> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const row = await videoRepository.findOneByOrFail({ id: videoId });
-      if (row.status !== VideoStatus.PROCESSING) return row;
+      if (row.status !== from) return row;
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
-    throw new Error(`Video ${videoId} never left processing`);
+    throw new Error(`Video ${videoId} never left ${from}`);
   }
 
   const enqueue = (video: Video) =>
@@ -247,6 +250,29 @@ describe('VideoProcessingProcessor (integration)', () => {
 
     expect(settled.status).toBe(VideoStatus.FAILED);
     expect(settled.processing_error).toContain('declared');
+  }, 60_000);
+
+  it('routes a janitor job to the sweep instead of the video pipeline', async () => {
+    // One queue carries both job kinds. If the name dispatch is wrong the
+    // janitor simply never runs, and nothing else in the system notices —
+    // so the routing is worth an explicit test.
+    const stale = await seedProcessing(fixture);
+    await videoRepository.update(stale.id, {
+      status: VideoStatus.UPLOADING,
+      upload_id: 'upload-that-no-longer-exists',
+    });
+    // Backdate past the 24h TTL with raw SQL: `repository.update` would
+    // refresh `updated_at` through @UpdateDateColumn and undo it.
+    await dataSource.query(
+      `UPDATE videos SET updated_at = now() - interval '48 hours' WHERE id = $1`,
+      [stale.id],
+    );
+
+    await queue.add(VIDEO_JOBS.UPLOAD_JANITOR, {} as VideoProcessJob);
+
+    const settled = await waitForSettled(stale.id, VideoStatus.UPLOADING);
+    expect(settled.status).toBe(VideoStatus.FAILED);
+    expect(settled.processing_error).toContain('never completed');
   }, 60_000);
 
   it('leaves an already-ready video untouched when the job is redelivered', async () => {

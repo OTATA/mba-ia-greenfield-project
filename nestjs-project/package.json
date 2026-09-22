@@ -29,7 +29,7 @@
     "worker": "nest start --entryFile worker.main",
     "worker:dev": "nest start --watch --entryFile worker.main",
     "worker:prod": "node dist/worker.main",
-    "test:worker": "jest --runInBand --testPathIgnorePatterns=/node_modules/ --testPathPatterns=videos/processing"
+    "test:worker": "jest --runInBand --testPathIgnorePatterns=/node_modules/ --testPathPatterns=video-processing.processor"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1130.0",
@@ -103,7 +103,7 @@
     ],
     "testPathIgnorePatterns": [
       "/node_modules/",
-      "<rootDir>/videos/processing/.*\\.integration-spec\\.ts$"
+      "<rootDir>/videos/processing/video-processing\\.processor\\.integration-spec\\.ts$"
     ]
   }
 }

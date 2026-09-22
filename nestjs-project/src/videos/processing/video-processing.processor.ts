@@ -12,9 +12,10 @@ import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialE
 import { Video, VideoStatus } from '../entities/video.entity';
 import { thumbnailObjectKey } from '../storage/storage-key.util';
 import { StorageService } from '../storage/storage.service';
-import { VIDEO_PROCESSING_QUEUE } from '../videos.constants';
+import { VIDEO_JOBS, VIDEO_PROCESSING_QUEUE } from '../videos.constants';
 import { FfmpegService, thumbnailTimestamp } from './ffmpeg.service';
 import { CommandFailedError } from './process-runner';
+import { UploadJanitorService } from './upload-janitor.service';
 import type { VideoProcessJob } from '../videos.service';
 
 /**
@@ -38,6 +39,7 @@ export class VideoProcessingProcessor extends WorkerHost {
     private readonly videoRepository: Repository<Video>,
     private readonly storageService: StorageService,
     private readonly ffmpegService: FfmpegService,
+    private readonly uploadJanitorService: UploadJanitorService,
   ) {
     super();
   }
@@ -50,6 +52,14 @@ export class VideoProcessingProcessor extends WorkerHost {
    * possibly failing, pass.
    */
   async process(job: Job<VideoProcessJob>): Promise<void> {
+    // One queue carries both job kinds, so the handler routes on the name.
+    // The janitor's payload is empty — reading `job.data.videoId` for it
+    // would quietly operate on `undefined`.
+    if (job.name === VIDEO_JOBS.UPLOAD_JANITOR) {
+      await this.uploadJanitorService.sweep();
+      return;
+    }
+
     const { videoId, storageKey } = job.data;
 
     const video = await this.videoRepository.findOneBy({ id: videoId });
@@ -164,6 +174,10 @@ export class VideoProcessingProcessor extends WorkerHost {
    */
   @OnWorkerEvent('failed')
   async onFailed(job: Job<VideoProcessJob>, error: Error): Promise<void> {
+    // The janitor carries no video, so there is no row to mark; a failed
+    // sweep simply runs again on the next interval.
+    if (job.name !== VIDEO_JOBS.PROCESS) return;
+
     const attempts = job.opts.attempts ?? 1;
     if (job.attemptsMade < attempts) return;
 

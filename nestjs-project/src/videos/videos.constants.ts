@@ -34,3 +34,20 @@ export const VIDEO_PROCESS_JOB_OPTIONS = {
   attempts: 3,
   backoff: { type: 'exponential' as const, delay: 5_000 },
 };
+
+/**
+ * How long a row may sit in `uploading` before the janitor reclaims it.
+ *
+ * Generous on purpose: this window has to accommodate a 10GB upload over a
+ * slow connection. Reclaiming too eagerly would abort uploads that are still
+ * legitimately in flight, which is far worse than leaving a dead one around
+ * for another few hours.
+ */
+export const ABANDONED_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Sweep cadence. The janitor is a safety net for a case that should be rare —
+ * a client that uploads every part and never calls `complete` — so it runs
+ * infrequently rather than polling the table hard.
+ */
+export const UPLOAD_JANITOR_INTERVAL_MS = 60 * 60 * 1000;

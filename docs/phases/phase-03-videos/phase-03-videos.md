@@ -568,31 +568,32 @@ Critical path: `SI-03.1 → SI-03.3 → SI-03.4 → SI-03.5 → SI-03.6 → SI-0
 
 ## Deliverables
 
-- [ ] SI-03.1 — Infra: storage, fila e worker no Compose
-- [ ] SI-03.2 — Entidade Video e migration
-- [ ] SI-03.3 — StorageService com endpoint duplo e assinatura de URLs
-- [ ] SI-03.4 — Fila de processamento e VideosModule
-- [ ] SI-03.5 — Endpoint POST /videos — rascunho e upload multipart pré-assinado
-- [ ] SI-03.6 — Endpoint POST /videos/:publicId/complete — handshake e enfileiramento
-- [ ] SI-03.7 — Endpoints de leitura — metadados, streaming e download
-- [ ] SI-03.8 — Worker de vídeo — bootstrap, metadados e thumbnail
-- [ ] SI-03.9 — Faxina de uploads abandonados
+- [x] SI-03.1 — Infra: storage, fila e worker no Compose
+- [x] SI-03.2 — Entidade Video e migration
+- [x] SI-03.3 — StorageService com endpoint duplo e assinatura de URLs
+- [x] SI-03.4 — Fila de processamento e VideosModule
+- [x] SI-03.5 — Endpoint POST /videos — rascunho e upload multipart pré-assinado
+- [x] SI-03.6 — Endpoint POST /videos/:publicId/complete — handshake e enfileiramento
+- [x] SI-03.7 — Endpoints de leitura — metadados, streaming e download
+- [x] SI-03.8 — Worker de vídeo — bootstrap, metadados e thumbnail
+- [x] SI-03.9 — Faxina de uploads abandonados
 
 **Phase capability deliverables** _(from `docs/project-plan.md` → Fase 03 Entregáveis)_:
 
-- [ ] Upload de até 10GB funcional — arquivo enviado direto ao storage por multipart pré-assinado, sem passar pela API
-- [ ] Processamento automático do vídeo — duração, metadados e thumbnail extraídos sem intervenção após a conclusão do upload
-- [ ] Streaming funcionando — reprodução por `Range`/`206` sem exigir download completo
-- [ ] URLs únicas geradas — `public_id` único por vídeo, com índice único no banco
-- [ ] Download do vídeo disponível para usuário autenticado
-- [ ] Ciclo de status refletido no banco — `draft → uploading → processing → ready | failed`
-- [ ] Object storage, fila e worker subindo via `docker compose` junto com o backend
+- [x] Upload de até 10GB funcional — arquivo enviado direto ao storage por multipart pré-assinado, sem passar pela API
+- [x] Processamento automático do vídeo — duração, metadados e thumbnail extraídos sem intervenção após a conclusão do upload
+- [x] Streaming funcionando — reprodução por `Range`/`206` sem exigir download completo
+- [x] URLs únicas geradas — `public_id` único por vídeo, com índice único no banco
+- [x] Download do vídeo disponível para usuário autenticado
+- [x] Ciclo de status refletido no banco — `draft → uploading → processing → ready | failed`
+- [x] Object storage, fila e worker subindo via `docker compose` junto com o backend
 
 **Full test suites** _(all commands run inside the container, per `nestjs-project/CLAUDE.md`)_:
 
-- [ ] Testes de unidade e integração passam (`docker compose exec nestjs-api npm test -- --runInBand`)
-- [ ] Testes E2E passam (`docker compose exec nestjs-api npm run test:e2e`)
-- [ ] Type-check limpo (`docker compose exec nestjs-api npx tsc --noEmit` — exit 0)
-- [ ] Lint limpo (`docker compose exec nestjs-api npm run lint`)
+- [x] Testes de unidade e integração passam (`docker compose exec nestjs-api npm test -- --runInBand`)
+- [x] Testes E2E passam (`docker compose exec nestjs-api npm run test:e2e`)
+- [x] Testes dependentes de FFmpeg passam (`docker compose exec video-worker npm run test:worker`) — rodam no container do worker porque é a única imagem com os binários
+- [x] Type-check limpo (`docker compose exec nestjs-api npx tsc --noEmit` — exit 0)
+- [x] Lint limpo (`docker compose exec nestjs-api npm run lint`)
 
 > `--runInBand` é obrigatório: as suítes de integração e E2E compartilham um único banco de teste, e esta fase acrescenta MinIO e Redis compartilhados ao mesmo conjunto.

@@ -3,6 +3,7 @@ import { StorageModule } from '../storage/storage.module';
 import { VideosModule } from '../videos.module';
 import { FfmpegService } from './ffmpeg.service';
 import { ProcessRunner } from './process-runner';
+import { UploadJanitorService } from './upload-janitor.service';
 import { VideoProcessingProcessor } from './video-processing.processor';
 
 /**
@@ -17,6 +18,11 @@ import { VideoProcessingProcessor } from './video-processing.processor';
  */
 @Module({
   imports: [VideosModule, StorageModule],
-  providers: [VideoProcessingProcessor, FfmpegService, ProcessRunner],
+  providers: [
+    VideoProcessingProcessor,
+    FfmpegService,
+    ProcessRunner,
+    UploadJanitorService,
+  ],
 })
 export class VideoProcessingModule {}
