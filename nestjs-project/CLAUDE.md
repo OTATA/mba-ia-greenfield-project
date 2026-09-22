@@ -66,7 +66,7 @@ npm run start:prod                       # Run compiled build
 npm test                                 # Unit tests
 npm run test:watch                       # Unit tests in watch mode
 npm run test:cov                         # Coverage report
-npm run test:e2e                         # End-to-end tests (always with --runInBand)
+npm run test:e2e                         # End-to-end tests (serial — see below)
 
 npx tsc --noEmit                         # Type-check (required before declaring a task done)
 npm run lint                             # ESLint with auto-fix
@@ -88,8 +88,38 @@ Integration and e2e suites share a single test database. They **must** be run wi
 
 ```bash
 docker compose exec nestjs-api npm test -- --runInBand
-docker compose exec nestjs-api npm run test:e2e   # already configured
+docker compose exec nestjs-api npm run test:e2e   # serial via config, see below
 ```
+
+The e2e suite enforces this through `"maxWorkers": 1` in `test/jest-e2e.json`, not through a
+`--runInBand` flag on the script. Keep it in the config: it also protects a direct
+`npx jest --config test/jest-e2e.json` invocation, which no script flag would cover.
+
+### Tests that need FFmpeg run in the worker container
+
+`ffmpeg`/`ffprobe` are installed **only** in the `video-worker` image — the API image
+deliberately does without them. Specs that shell out to those binaries therefore cannot run
+in `nestjs-api`, and are excluded from its `npm test` by `testPathIgnorePatterns`. Run them
+where the binaries live:
+
+```bash
+docker compose exec video-worker npm run test:worker
+```
+
+A full verification is therefore **three** commands, not two:
+
+```bash
+docker compose exec nestjs-api npm test -- --runInBand   # unit + integration
+docker compose exec nestjs-api npm run test:e2e          # HTTP contracts
+docker compose exec video-worker npm run test:worker     # FFmpeg-dependent specs
+```
+
+### Do not leave the worker running while the e2e suite runs
+
+The e2e suite asserts that a completed upload sits in `processing`. A live worker consuming
+`video-processing` will race those assertions by flipping rows to `ready`. The default state
+of the environment — containers up, application processes not started — is what keeps the
+suite deterministic.
 
 Parallel execution causes FK violations, deadlocks, and cross-suite contamination because suites truncate or seed shared tables concurrently.
 

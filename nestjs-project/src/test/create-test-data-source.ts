@@ -31,6 +31,10 @@ export function createTestDataSource(
 }
 
 export async function cleanAllTables(dataSource: DataSource): Promise<void> {
+  // Order matters: children before parents. `videos` would also disappear via
+  // the CASCADE on channels, but deleting it explicitly keeps the helper
+  // readable and independent of the FK's ON DELETE policy.
+  await dataSource.query('DELETE FROM "videos"');
   await dataSource.query('DELETE FROM "refresh_tokens"');
   await dataSource.query('DELETE FROM "verification_tokens"');
   await dataSource.query('DELETE FROM "channels"');

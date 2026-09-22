@@ -21,4 +21,27 @@ export const envValidationSchema = Joi.object({
   MAIL_PORT: Joi.number().default(1025),
   MAIL_FROM: Joi.string().default('"StreamTube" <noreply@streamtube.com>'),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
+
+  // Object storage (MinIO locally, S3-compatible in production).
+  // Two endpoints on purpose — SigV4 signs the Host header, so a URL signed for
+  // the internal Compose host is unreachable from a browser and cannot be
+  // rewritten without invalidating the signature.
+  S3_INTERNAL_ENDPOINT: Joi.string().uri().required(),
+  S3_PUBLIC_ENDPOINT: Joi.string().uri().required(),
+  S3_REGION: Joi.string().default('us-east-1'),
+  S3_ACCESS_KEY: Joi.string().required(),
+  S3_SECRET_KEY: Joi.string().required(),
+  S3_VIDEOS_BUCKET: Joi.string().default('streamtube-videos'),
+  S3_THUMBNAILS_BUCKET: Joi.string().default('streamtube-thumbnails'),
+  // 64 MiB — 10GB spans ~160 parts, well under the 10 000-part S3 ceiling.
+  S3_UPLOAD_PART_SIZE_BYTES: Joi.number().min(5242880).default(67108864),
+  S3_PRESIGNED_URL_TTL_SECONDS: Joi.number().default(1800),
+
+  // Queue (BullMQ over Redis)
+  REDIS_HOST: Joi.string().default('redis'),
+  REDIS_PORT: Joi.number().default(6379),
+  QUEUE_PROCESSING_ATTEMPTS: Joi.number().default(3),
+  QUEUE_PROCESSING_BACKOFF_MS: Joi.number().default(5000),
+  QUEUE_ABANDONED_UPLOAD_TTL_MINUTES: Joi.number().default(1440),
+  QUEUE_JANITOR_INTERVAL_MS: Joi.number().default(900000),
 });

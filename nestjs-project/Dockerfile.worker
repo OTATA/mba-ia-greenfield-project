@@ -1,0 +1,11 @@
+FROM node:25.6.0-slim
+
+# ffmpeg brings both `ffmpeg` and `ffprobe`. They live only in this image —
+# the API never invokes them, and they add substantial weight.
+RUN apt update && apt install -y procps curl ffmpeg && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /home/node/app
+
+USER node
+
+CMD [ "tail", "-f", "/dev/null" ]

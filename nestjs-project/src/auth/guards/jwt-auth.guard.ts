@@ -8,6 +8,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { BEARER_PREFIX } from '../auth.constants';
 import { JwtPayload } from '../auth.types';
+import { IS_OPTIONAL_AUTH_KEY } from '../decorators/optional-auth.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
@@ -29,7 +30,13 @@ export class JwtAuthGuard implements CanActivate {
       .getRequest<{ headers: Record<string, string>; user: unknown }>();
     const authHeader = request.headers?.authorization;
 
+    const isOptional = this.reflector.getAllAndOverride<boolean>(
+      IS_OPTIONAL_AUTH_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
     if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
+      if (isOptional) return true;
       throw new UnauthorizedException();
     }
 
@@ -40,6 +47,9 @@ export class JwtAuthGuard implements CanActivate {
       request.user = payload;
       return true;
     } catch {
+      // On an optional-auth route the caller stays anonymous: the route works
+      // without credentials, so bad credentials must not be worse than none.
+      if (isOptional) return true;
       throw new UnauthorizedException();
     }
   }

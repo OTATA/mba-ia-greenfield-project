@@ -1,6 +1,6 @@
 services:
   nestjs-api:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.dev
     ports:
@@ -12,6 +12,27 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Consumes the video-processing queue. Separate container because FFmpeg must
+  # not live in the API image, and because a 10GB transcode must never compete
+  # with request handling for CPU or event-loop time.
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   db:
     image: postgres:17
@@ -33,4 +54,68 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      # 9000 is published so that presigned URLs signed against
+      # S3_PUBLIC_ENDPOINT are reachable from the host / browser.
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=streamtube
+      - MINIO_ROOT_PASSWORD=streamtube123
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
+  # One-shot: creates the two buckets and makes only the thumbnails bucket
+  # world-readable. Videos stay private and are reached via presigned GET.
+  # Storage-side counterpart to the upload janitor.
+  #
+  # The janitor reclaims *rows* stuck in `uploading`; the parts those uploads
+  # already pushed are storage's problem. On real S3 that is the
+  # `AbortIncompleteMultipartUpload` bucket lifecycle rule. MinIO does not
+  # express it as a lifecycle rule — `mc ilm rule add` has no flag for it —
+  # and instead cleans stale multipart uploads through server settings, which
+  # ship enabled by default:
+  #
+  #   api.stale_uploads_expiry=24h
+  #   api.stale_uploads_cleanup_interval=6h
+  #
+  # (verified with `mc admin config get local api`). They are deliberately not
+  # overridden here: the defaults already match the janitor's own TTL. When
+  # this moves to real S3, add the lifecycle rule to the bucket instead.
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 streamtube streamtube123 &&
+      mc mb --ignore-existing local/streamtube-videos &&
+      mc mb --ignore-existing local/streamtube-thumbnails &&
+      mc anonymous set download local/streamtube-thumbnails &&
+      echo 'buckets ready'
+      "
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  minio-data:
+  redis-data:
