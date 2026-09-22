@@ -68,3 +68,35 @@ export class UnsupportedContentTypeException extends DomainException {
     );
   }
 }
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class NotVideoOwnerException extends DomainException {
+  constructor() {
+    super('NOT_VIDEO_OWNER', 403, 'Video belongs to another channel');
+  }
+}
+
+export class InvalidUploadStateException extends DomainException {
+  constructor(currentStatus: string) {
+    super(
+      'INVALID_UPLOAD_STATE',
+      409,
+      `Upload cannot be completed while the video is "${currentStatus}"`,
+    );
+  }
+}
+
+export class UploadPartMismatchException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_PART_MISMATCH',
+      400,
+      'Submitted part list does not match the plan issued at create-upload',
+    );
+  }
+}

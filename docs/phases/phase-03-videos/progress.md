@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/9 completed
+**SIs:** 6/9 completed
 
 ### SI-03.1 — Infra: storage, fila e worker no Compose
 - **Status:** completed
@@ -55,9 +55,16 @@
   - Cada `createUpload` abre um multipart real no MinIO. As suítes de integração e e2e abortam explicitamente os uploads que abriram no `afterAll`, senão eles se acumulariam no bucket entre execuções — a faxina que os reclamaria só chega no SI-03.9.
 
 ### SI-03.6 — Endpoint POST /videos/:publicId/complete — handshake e enfileiramento
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 16 novos (8 unit de guards, 2 integration, 6 e2e). Suíte completa: 216 passing / 31 suites; e2e 64 passing / 5 suites.
+- **Observations:**
+  - **Part size reduzido para 5 MiB sob teste.** Reconciliar a lista de partes só é exercitável com um plano de mais de uma parte, e no part size de produção (64 MiB) isso significaria mover 64 MB dentro de um teste. `setup-test-env.ts` agora fixa `S3_UPLOAD_PART_SIZE_BYTES` em 5 MiB, que é o piso do S3 para partes não-finais — abaixo disso o `CompleteMultipartUpload` é recusado. Com isso um payload de 6 MiB já produz duas partes. Efeito colateral aceito: o teste de teto de 10GB do SI-03.5 passou a planejar 2048 partes em vez de 160, o que custa ~1,3s de assinatura (só CPU, sem rede).
+  - **O plano de partes não é persistido.** É função pura do `declared_size_bytes` com o part size configurado, então é recalculado na conclusão em vez de gravado e mantido em sincronia. A reconciliação exige cobertura exata de `1..N` — rejeita falta, sobra e duplicata. A duplicata importa: duas cópias da parte 1 passariam por uma checagem ingênua de contagem deixando a parte 2 sem cobertura, e há teste dedicado para isso.
+  - **Ordem dos guards é deliberada e testada:** posse antes de estado. Um estranho que recebesse 409 aprenderia o estado de processamento de um vídeo alheio; respondendo 403 primeiro, ele só aprende que o vídeo não é dele.
+  - Flip de status e enfileiramento compartilham transação. A garantia que isso compra é não existir vídeo em `processing` sem job que o processe — se o `queue.add` falhar, o update sofre rollback e a linha permanece `uploading`, recuperável pela faxina e por novo `complete`. O resíduo inverso (job enfileirado e commit falho depois) é o mal menor: o worker encontra um vídeo que não está em `processing`.
+  - `upload_id` é zerado na conclusão. O campo é lido pela faxina do SI-03.9 para decidir o que abortar; mantê-lo preenchido após a montagem faria a linha se apresentar como upload em voo.
+  - `storage_key` **não** é regravado na conclusão, embora a ação técnica do plano diga "grava storage_key" — o SI-03.5 já o escreve na criação do rascunho, e o guard de status garante que uma linha `uploading` o tem preenchido. Regravar o mesmo valor seria ruído.
+  - Adicionada também `VideoNotFoundException` (404), que o plano lista no Error Catalog mas não entre as exceções do SI. O endpoint de complete precisa dela, e o SI-03.7 vai reusá-la.
 
 ### SI-03.7 — Endpoints de leitura — metadados, streaming e download
 - **Status:** pending

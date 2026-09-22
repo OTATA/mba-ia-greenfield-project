@@ -18,3 +18,14 @@
 if (process.env.S3_INTERNAL_ENDPOINT) {
   process.env.S3_PUBLIC_ENDPOINT = process.env.S3_INTERNAL_ENDPOINT;
 }
+
+/**
+ * Shrink the multipart part size to S3's floor for non-final parts (5 MiB).
+ *
+ * Reconciling a submitted part list against the issued plan can only be
+ * exercised when a plan has more than one part. At the production part size of
+ * 64 MiB that would mean pushing 64 MB through a test; at 5 MiB a 6 MiB payload
+ * already produces two parts. Going below 5 MiB is not an option — storage
+ * rejects `CompleteMultipartUpload` when a non-final part is smaller.
+ */
+process.env.S3_UPLOAD_PART_SIZE_BYTES = String(5 * 1024 * 1024);

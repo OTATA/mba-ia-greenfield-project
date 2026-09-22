@@ -1,11 +1,18 @@
+import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
 import { ChannelsService } from '../channels/channels.service';
 import {
+  InvalidUploadStateException,
+  NotVideoOwnerException,
   UnsupportedContentTypeException,
+  UploadPartMismatchException,
   UploadTooLargeException,
+  VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
+import { CompleteVideoUploadDto } from './dto/complete-video-upload.dto';
 import { CreateVideoUploadDto } from './dto/create-video-upload.dto';
 import { Video, VideoStatus } from './entities/video.entity';
 import { generateUniquePublicId } from './public-id.util';
@@ -18,6 +25,8 @@ import { deriveTitleFromFilename } from './title.util';
 import {
   ACCEPTED_VIDEO_MIME_TYPES,
   MAX_UPLOAD_SIZE_BYTES,
+  VIDEO_JOBS,
+  VIDEO_PROCESSING_QUEUE,
 } from './videos.constants';
 
 /** Response of `POST /videos` — the client's instructions for uploading. */
@@ -28,6 +37,19 @@ export interface CreatedUpload {
   parts: PresignedUploadPart[];
 }
 
+/** Response of `POST /videos/:publicId/complete`. */
+export interface CompletedUpload {
+  public_id: string;
+  status: VideoStatus;
+}
+
+/** Payload of the `video.process` job consumed by the worker container. */
+export interface VideoProcessJob {
+  videoId: string;
+  bucket: string;
+  storageKey: string;
+}
+
 @Injectable()
 export class VideosService {
   constructor(
@@ -35,6 +57,8 @@ export class VideosService {
     private readonly videoRepository: Repository<Video>,
     private readonly channelsService: ChannelsService,
     private readonly storageService: StorageService,
+    @InjectQueue(VIDEO_PROCESSING_QUEUE)
+    private readonly processingQueue: Queue<VideoProcessJob>,
   ) {}
 
   /**
@@ -101,6 +125,95 @@ export class VideosService {
       part_size: this.storageService.uploadPartSizeBytes,
       parts,
     };
+  }
+
+  /**
+   * Closes the multipart upload and hands the video to the worker.
+   *
+   * There is no storage webhook: this call *is* the completion signal, which
+   * is why assembling the object, flipping the status and enqueueing the job
+   * all belong to one request.
+   *
+   * The status flip and the enqueue share a transaction so the system can
+   * never end up with a video marked `processing` that no worker will ever
+   * pick up. The opposite residue — a job enqueued for a row that stayed
+   * `uploading` because the commit failed — is recoverable: the worker sees a
+   * video that is not `processing` and the janitor reclaims the row.
+   */
+  async completeUpload(
+    userId: string,
+    publicId: string,
+    dto: CompleteVideoUploadDto,
+  ): Promise<CompletedUpload> {
+    const video = await this.videoRepository.findOneBy({ public_id: publicId });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+
+    const channel = await this.channelsService.findByUserId(userId);
+    if (!channel || channel.id !== video.channel_id) {
+      throw new NotVideoOwnerException();
+    }
+
+    if (video.status !== VideoStatus.UPLOADING) {
+      throw new InvalidUploadStateException(video.status);
+    }
+
+    this.assertPartsMatchPlan(video, dto.parts);
+
+    // `storage_key` and `upload_id` are written at create-upload, and the
+    // status guard above guarantees both are set on an `uploading` row.
+    const storageKey = video.storage_key!;
+    await this.storageService.completeMultipartUpload(
+      storageKey,
+      video.upload_id!,
+      dto.parts,
+    );
+
+    await this.videoRepository.manager.transaction(async (manager) => {
+      await manager.update(Video, video.id, {
+        status: VideoStatus.PROCESSING,
+        // No longer in flight — keeping it would misrepresent the row to the
+        // janitor sweep, which reads `upload_id` to abort abandoned uploads.
+        upload_id: null,
+      });
+      await this.processingQueue.add(VIDEO_JOBS.PROCESS, {
+        videoId: video.id,
+        bucket: this.storageService.videosBucket,
+        storageKey,
+      });
+    });
+
+    return { public_id: video.public_id, status: VideoStatus.PROCESSING };
+  }
+
+  /**
+   * The part plan is not stored: it is a pure function of the declared size
+   * and the configured part size, so it is recomputed here rather than
+   * persisted and kept in sync. A submitted list matches only if it covers
+   * exactly part numbers `1..N`, with no gaps, extras or duplicates.
+   */
+  private assertPartsMatchPlan(
+    video: Video,
+    submitted: { part_number: number }[],
+  ): void {
+    const expectedCount = Math.ceil(
+      video.declared_size_bytes / this.storageService.uploadPartSizeBytes,
+    );
+    const submittedNumbers = new Set(submitted.map((p) => p.part_number));
+
+    if (
+      submitted.length !== expectedCount ||
+      submittedNumbers.size !== expectedCount
+    ) {
+      throw new UploadPartMismatchException();
+    }
+
+    for (let partNumber = 1; partNumber <= expectedCount; partNumber++) {
+      if (!submittedNumbers.has(partNumber)) {
+        throw new UploadPartMismatchException();
+      }
+    }
   }
 
   /**

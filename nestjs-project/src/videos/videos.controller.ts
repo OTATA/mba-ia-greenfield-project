@@ -1,7 +1,15 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiResponse,
   ApiTags,
   getSchemaPath,
@@ -9,8 +17,13 @@ import {
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
+import { CompleteVideoUploadDto } from './dto/complete-video-upload.dto';
 import { CreateVideoUploadDto } from './dto/create-video-upload.dto';
-import { VideosService, type CreatedUpload } from './videos.service';
+import {
+  VideosService,
+  type CompletedUpload,
+  type CreatedUpload,
+} from './videos.service';
 
 @ApiTags('videos')
 @Controller('videos')
@@ -78,5 +91,60 @@ export class VideosController {
     @Body() dto: CreateVideoUploadDto,
   ): Promise<CreatedUpload> {
     return this.videosService.createUpload(user.sub, dto);
+  }
+
+  @Post(':publicId/complete')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiBearerAuth()
+  @ApiParam({ name: 'publicId', description: 'Public identifier of the video' })
+  @ApiOperation({
+    summary: 'Finalize a video upload',
+    description:
+      'Assembles the uploaded parts into the stored object, moves the video ' +
+      'to processing and enqueues the processing job. This call is itself the ' +
+      'upload-completion signal — no storage webhook is involved. Answers 202 ' +
+      'because processing continues asynchronously after the response.',
+  })
+  @ApiResponse({
+    status: 202,
+    description: 'Upload finalized and queued for processing',
+    schema: {
+      properties: {
+        public_id: { type: 'string' },
+        status: { type: 'string', example: 'processing' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation failed, or the part list does not match the plan',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Video belongs to another channel',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'No video matches the public id',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is not in the uploading state',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async completeUpload(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: CompleteVideoUploadDto,
+  ): Promise<CompletedUpload> {
+    return this.videosService.completeUpload(user.sub, publicId, dto);
   }
 }
