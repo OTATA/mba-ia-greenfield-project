@@ -5,8 +5,15 @@ interface TestDataSourceOptions {
   migrations?: (new () => MigrationInterface)[];
 }
 
+/**
+ * An entity class. TypeORM's own option type widens this to `Function`, which
+ * `no-unsafe-function-type` rejects; a constructor signature is assignable to
+ * `Function` and says what we actually accept.
+ */
+type EntityClass = new (...args: any[]) => object;
+
 export function createTestDataSource(
-  entities: (Function | string | EntitySchema<any>)[],
+  entities: (EntityClass | string | EntitySchema<any>)[],
   options: TestDataSourceOptions = {},
 ): DataSource {
   const { synchronize = true, migrations } = options;
@@ -24,6 +31,10 @@ export function createTestDataSource(
 }
 
 export async function cleanAllTables(dataSource: DataSource): Promise<void> {
+  // Order matters: children before parents. `videos` would also disappear via
+  // the CASCADE on channels, but deleting it explicitly keeps the helper
+  // readable and independent of the FK's ON DELETE policy.
+  await dataSource.query('DELETE FROM "videos"');
   await dataSource.query('DELETE FROM "refresh_tokens"');
   await dataSource.query('DELETE FROM "verification_tokens"');
   await dataSource.query('DELETE FROM "channels"');

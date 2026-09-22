@@ -4,7 +4,7 @@ import { ConfigModule, ConfigType } from '@nestjs/config';
 import type { StringValue } from 'ms';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import appConfig from '../config/app.config';
 import authConfig from '../config/auth.config';
 import mailConfig from '../config/mail.config';
@@ -17,6 +17,7 @@ import {
   TokenReuseDetectedException,
 } from '../common/exceptions/domain.exception';
 import { MailModule } from '../mail/mail.module';
+import { MailService } from '../mail/mail.service';
 import { Channel } from '../channels/entities/channel.entity';
 import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
@@ -31,8 +32,9 @@ import {
   VerificationToken,
   VerificationTokenType,
 } from './entities/verification-token.entity';
+import { Video } from '../videos/entities/video.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken];
+const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
 
 async function createAuthTestModule(): Promise<TestingModule> {
   const ds = createTestDataSource(ALL_ENTITIES);
@@ -63,14 +65,27 @@ async function createAuthTestModule(): Promise<TestingModule> {
   }).compile();
 }
 
+/**
+ * `mailService` is a private field of `AuthService`. These tests spy on the
+ * real instance to capture the token the service mails out, so they need a
+ * typed view of that field rather than an `any` cast.
+ */
+interface AuthServiceInternals {
+  mailService: MailService;
+}
+
+function mailServiceOf(authService: AuthService): MailService {
+  return (authService as unknown as AuthServiceInternals).mailService;
+}
+
 function captureConfirmationToken(authService: AuthService): Promise<string> {
   return new Promise((resolve) => {
-    const mailServiceInstance = (authService as any).mailService;
     jest
-      .spyOn(mailServiceInstance, 'sendConfirmationEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) =>
-        resolve(t),
-      );
+      .spyOn(mailServiceOf(authService), 'sendConfirmationEmail')
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
+        resolve(t);
+        return Promise.resolve();
+      });
   });
 }
 
@@ -231,7 +246,7 @@ describe('AuthService — confirm (integration)', () => {
 
   it('throws TokenExpiredException for an expired token', async () => {
     const capturePromise = captureConfirmationToken(authService);
-    const { id: userId } = await authService.register({
+    await authService.register({
       email: 'expired@example.com',
       password: 'password123',
     });
@@ -466,8 +481,8 @@ describe('AuthService — refresh (integration)', () => {
 
     const activeTokens = await refreshTokenRepository.findBy({
       family,
-      revoked_at: null,
-    } as any);
+      revoked_at: IsNull(),
+    });
     expect(activeTokens.length).toBeGreaterThan(0);
   });
 
@@ -562,12 +577,12 @@ describe('AuthService — logout (integration)', () => {
 
 function capturePasswordResetToken(authService: AuthService): Promise<string> {
   return new Promise((resolve) => {
-    const mailServiceInstance = (authService as any).mailService;
     jest
-      .spyOn(mailServiceInstance, 'sendPasswordResetEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) =>
-        resolve(t),
-      );
+      .spyOn(mailServiceOf(authService), 'sendPasswordResetEmail')
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
+        resolve(t);
+        return Promise.resolve();
+      });
   });
 }
 

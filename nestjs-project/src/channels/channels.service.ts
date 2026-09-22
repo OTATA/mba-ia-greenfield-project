@@ -7,19 +7,39 @@ const PG_UNIQUE_VIOLATION = '23505';
 const NICKNAME_COLUMN = 'nickname';
 const MAX_RETRIES = 5;
 
+/**
+ * The `pg` driver copies `code` and `detail` onto the thrown error; TypeORM's
+ * `QueryFailedError` does not declare them.
+ */
+interface PostgresErrorFields {
+  code?: string;
+  detail?: string;
+}
+
 function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
   if (!(err instanceof QueryFailedError)) return false;
-  const e = err as any;
+  const { code, detail } = err as QueryFailedError & PostgresErrorFields;
   return (
-    e.code === PG_UNIQUE_VIOLATION &&
-    typeof e.detail === 'string' &&
-    e.detail.includes(column)
+    code === PG_UNIQUE_VIOLATION &&
+    typeof detail === 'string' &&
+    detail.includes(column)
   );
 }
 
 @Injectable()
 export class ChannelsService {
   constructor(private readonly dataSource: DataSource) {}
+
+  /**
+   * Resolves the channel a user owns, relying on the 1:1 user↔channel relation
+   * established at registration. Other modules go through this rather than
+   * querying `Channel` directly, so the entity stays owned by this module.
+   */
+  async findByUserId(userId: string): Promise<Channel | null> {
+    return this.dataSource
+      .getRepository(Channel)
+      .findOne({ where: { user_id: userId } });
+  }
 
   async createChannel(userId: string, email: string): Promise<Channel> {
     const baseNickname = sanitizeNickname(email.split('@')[0]);

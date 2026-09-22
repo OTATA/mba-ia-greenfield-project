@@ -2,6 +2,7 @@ import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
+import { IS_OPTIONAL_AUTH_KEY } from '../decorators/optional-auth.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 const TEST_SECRET = 'test-secret';
@@ -87,5 +88,47 @@ describe('JwtAuthGuard', () => {
       headers: { authorization: `Bearer ${expiredToken}` },
     });
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+  });
+
+  /**
+   * `@OptionalAuth()` exists because `@Public()` short-circuits before the
+   * token is read, leaving `@CurrentUser()` undefined even for a caller who
+   * did authenticate. Routes whose response depends on who is asking need the
+   * identity without making it mandatory.
+   */
+  describe('on an @OptionalAuth() route', () => {
+    beforeEach(() => {
+      mockReflector.getAllAndOverride.mockImplementation(
+        (key: string) => key === IS_OPTIONAL_AUTH_KEY,
+      );
+    });
+
+    it('admits an anonymous caller and leaves request.user unset', async () => {
+      const request: Record<string, unknown> = { headers: {} };
+
+      await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+      expect(request.user).toBeUndefined();
+    });
+
+    it('attaches the payload when a valid token is presented', async () => {
+      const token = jwtService.sign({ sub: 'user-1', email: 'a@example.com' });
+      const request: Record<string, unknown> = {
+        headers: { authorization: `Bearer ${token}` },
+      };
+
+      await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+      expect((request.user as Record<string, unknown>)?.sub).toBe('user-1');
+    });
+
+    it('treats an invalid token as anonymous instead of rejecting', async () => {
+      // The route works without credentials, so bad credentials must not be
+      // worse than none — otherwise a stale token would break public browsing.
+      const request: Record<string, unknown> = {
+        headers: { authorization: 'Bearer not-a-valid-jwt' },
+      };
+
+      await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+      expect(request.user).toBeUndefined();
+    });
   });
 });
