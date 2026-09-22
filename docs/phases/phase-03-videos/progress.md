@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/9 completed
+**SIs:** 8/9 completed
 
 ### SI-03.1 — Infra: storage, fila e worker no Compose
 - **Status:** completed
@@ -79,9 +79,20 @@
   - **Teardown dos specs corrigido.** O `afterAll` estourava o timeout de 5s: ele tentava abortar uploads já concluídos, e o SDK da AWS faz retry com backoff antes de desistir. Agora consulta `listMultipartUploadIds()` uma vez e aborta só o que segue aberto, em paralelo com os deletes.
 
 ### SI-03.8 — Worker de vídeo — bootstrap, metadados e thumbnail
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 21 novos (16 unit de ffmpeg/parsing, 5 integration do processor). Suíte completa: API 249 passing / 32 suites, e2e 71 passing / 6 suites, worker 21 passing / 2 suites.
+- **Observations:**
+  - **A suíte passou a exigir três comandos, não dois.** O `ffmpeg`/`ffprobe` existe só na imagem do worker — propriedade deliberada do TD-06, verificada no SI-03.1. O spec de integração do processor precisa dos binários, então roda em `docker compose exec video-worker npm run test:worker`, e está excluído do `npm test` da API por `testPathIgnorePatterns`. A alternativa (instalar ffmpeg na imagem de dev da API) foi descartada por contradizer a separação de imagens. Registrado no `nestjs-project/CLAUDE.md`.
+  - **O processor não pode viver num módulo que a API carrega.** Registrar um `@Processor` é o que transforma um processo em consumidor da fila; se o `AppModule` importasse o módulo de processamento, a própria API passaria a processar vídeos, anulando a topologia de worker separado. Daí `VideoProcessingModule` ser importado **só** pelo `WorkerModule`. O `WorkerModule` por sua vez compõe o `AppModule` em vez de redeclarar infra, para que config, `DataSource` e conexão de fila sejam literalmente os mesmos — um worker apontando para outro banco seria um bug caro e silencioso.
+  - **Falha do `ffprobe` é veredito, não falha transitória.** Na primeira rodada, um arquivo que não era vídeo queimava as 3 tentativas com backoff exponencial (20s) antes de assentar em `failed`. Um arquivo ilegível não vira legível por insistência, então `CommandFailedError` vindo do probe é traduzido em `VideoVerificationError` e assenta na primeira tentativa. A suíte do worker caiu de 20,6s para 5,1s.
+  - **Ordem de descarte corrigida por causa de um teste flaky legítimo.** Eu marcava `failed` e só então apagava o objeto; o teste observava a linha e encontrava o objeto ainda lá. A correção não foi no teste: apagar **antes** de virar o status torna o invariante verdadeiro para qualquer observador — quando um vídeo lê `failed`, o objeto já não existe.
+  - Idempotência é garantida por guard de status: job redelivered num vídeo já `ready` retorna sem reprocessar. O teste assevera inclusive que `updated_at` não se move — prova que nenhuma escrita ocorreu, não apenas que o resultado coincidiu.
+  - `-ss` vai **antes** de `-i` no comando do thumbnail: isso faz o ffmpeg buscar por índice em vez de decodificar desde o começo, diferença entre instantâneo e minutos num arquivo de gigabytes. Há teste asseverando a ordem dos argumentos, porque inverter é um erro fácil e silencioso.
+  - `ProcessRunner` foi extraído como seam injetável em vez de mockar o módulo `node:child_process`. Isso respeita a regra de mockar na fronteira do guia de testes, e mantém o `stdout` como Buffer — decodificar como texto corromperia o JPEG do thumbnail.
+  - `tsc` pegou um erro que o ts-jest não pegou: o `QueryDeepPartialEntity` do TypeORM não expressa um `Record<string, unknown>` destinado a coluna jsonb. Resolvido com cast localizado na fronteira, conforme `.claude/rules/typescript-strict.md`.
+  - Fixture `__fixtures__/tiny.mp4` (10890 bytes, 2s, h264) gerado por ffmpeg e commitado, para o teste não depender de quais encoders a imagem tem.
+  - **AC #5 verificado de fato, não por inferência:** worker subido em seu container, job enfileirado a partir do container da API, linha levada a `ready` pelo worker; API respondendo `200` em 1–10 ms durante o processamento. Ambos os processos foram derrubados depois — o estado convencional do ambiente é containers no ar sem processos de aplicação.
+  - Risco registrado no CLAUDE.md: **não deixar o worker rodando durante a suíte e2e.** O e2e assevera que um upload concluído fica em `processing`; um worker vivo vira a linha para `ready` e corre com a asserção.
 
 ### SI-03.9 — Faxina de uploads abandonados
 - **Status:** pending

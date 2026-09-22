@@ -291,11 +291,20 @@ describe('VideosService.completeUpload — guards', () => {
         'upload-1',
         expect.any(Array),
       );
-      expect(queue.add).toHaveBeenCalledWith('video.process', {
-        videoId: 'video-uuid',
-        bucket: 'streamtube-videos',
-        storageKey: 'videos/video-uuid/original.mp4',
-      });
+      expect(queue.add).toHaveBeenCalledWith(
+        'video.process',
+        {
+          videoId: 'video-uuid',
+          bucket: 'streamtube-videos',
+          storageKey: 'videos/video-uuid/original.mp4',
+        },
+        // Retries are part of the contract with the worker: a transient
+        // failure must not turn into a permanently stuck video.
+        expect.objectContaining({
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5_000 },
+        }),
+      );
     });
   });
 });

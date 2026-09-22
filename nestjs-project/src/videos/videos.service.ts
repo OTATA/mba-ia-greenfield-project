@@ -27,6 +27,7 @@ import {
   ACCEPTED_VIDEO_MIME_TYPES,
   MAX_UPLOAD_SIZE_BYTES,
   VIDEO_JOBS,
+  VIDEO_PROCESS_JOB_OPTIONS,
   VIDEO_PROCESSING_QUEUE,
 } from './videos.constants';
 
@@ -194,11 +195,15 @@ export class VideosService {
         // janitor sweep, which reads `upload_id` to abort abandoned uploads.
         upload_id: null,
       });
-      await this.processingQueue.add(VIDEO_JOBS.PROCESS, {
-        videoId: video.id,
-        bucket: this.storageService.videosBucket,
-        storageKey,
-      });
+      await this.processingQueue.add(
+        VIDEO_JOBS.PROCESS,
+        {
+          videoId: video.id,
+          bucket: this.storageService.videosBucket,
+          storageKey,
+        },
+        VIDEO_PROCESS_JOB_OPTIONS,
+      );
     });
 
     return { public_id: video.public_id, status: VideoStatus.PROCESSING };
