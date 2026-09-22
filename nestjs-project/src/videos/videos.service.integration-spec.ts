@@ -79,18 +79,30 @@ describe('VideosService (integration)', () => {
   afterAll(async () => {
     // Uploads left open would accumulate in the bucket across runs; the
     // janitor that would otherwise reclaim them ships in a later SI.
-    for (const { key, uploadId } of openedUploads) {
-      await storage.abortMultipartUpload(key, uploadId).catch(() => undefined);
-    }
-    for (const key of storedKeys) {
-      await storage.deleteVideoObject(key).catch(() => undefined);
-    }
+    //
+    // Only the ones still open are aborted. Aborting an already-completed
+    // upload fails, and the SDK retries with backoff before giving up, which
+    // is slow enough to blow the hook timeout once a few tests complete their
+    // uploads. Asking storage what is actually open avoids that entirely.
+    const stillOpen = new Set(
+      await storage.listMultipartUploadIds().catch(() => []),
+    );
+    await Promise.all([
+      ...openedUploads
+        .filter(({ uploadId }) => stillOpen.has(uploadId))
+        .map(({ key, uploadId }) =>
+          storage.abortMultipartUpload(key, uploadId).catch(() => undefined),
+        ),
+      ...storedKeys.map((key) =>
+        storage.deleteVideoObject(key).catch(() => undefined),
+      ),
+    ]);
     // BullMQ holds Redis sockets open — closing the queue keeps Jest from
     // hanging after the run.
     await queue.obliterate({ force: true }).catch(() => undefined);
     await queue.close();
     await moduleRef.close();
-  });
+  }, 30_000);
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
@@ -255,6 +267,68 @@ describe('VideosService (integration)', () => {
       await expect(queue.getJobs(['waiting', 'delayed'])).resolves.toHaveLength(
         0,
       );
+    });
+  });
+
+  /**
+   * The value of these against real MinIO is the two behaviours the API
+   * deliberately does *not* implement: `Range`/`206` handling and the
+   * attachment disposition. Both are delegated to storage through the
+   * signature, so only a real fetch can prove they work.
+   */
+  describe('delivery URLs', () => {
+    /** Uploads a real object and leaves the row in `ready`, as the worker would. */
+    const readyVideo = async () => {
+      const { result, row } = await createUpload(
+        'holiday.mp4',
+        TWO_PART_PAYLOAD,
+      );
+      const parts = await uploadParts(result.parts);
+      await service.completeUpload(channel.user_id, result.public_id, {
+        parts,
+      });
+      storedKeys.push(row.storage_key!);
+      await videoRepository.update(row.id, { status: VideoStatus.READY });
+      return { publicId: result.public_id, row };
+    };
+
+    it('issues a playback URL that answers a Range request with 206', async () => {
+      const { publicId } = await readyVideo();
+
+      const issued = await service.issuePlaybackUrl(publicId);
+      expect(issued.expires_in).toBeGreaterThan(0);
+
+      const ranged = await fetch(issued.url, {
+        headers: { Range: 'bytes=0-1023' },
+      });
+
+      expect(ranged.status).toBe(206);
+      expect(ranged.headers.get('content-range')).toBeTruthy();
+      // Exactly the requested window — the whole object was not transferred.
+      expect((await ranged.arrayBuffer()).byteLength).toBe(1024);
+    });
+
+    it('serves the full object when no Range is requested', async () => {
+      const { publicId } = await readyVideo();
+
+      const issued = await service.issuePlaybackUrl(publicId);
+      const full = await fetch(issued.url);
+
+      expect(full.status).toBe(200);
+      expect((await full.arrayBuffer()).byteLength).toBe(TWO_PART_PAYLOAD);
+    });
+
+    it('issues a download URL carrying the attachment disposition', async () => {
+      const { publicId } = await readyVideo();
+
+      const issued = await service.issueDownloadUrl(publicId);
+      const res = await fetch(issued.url);
+
+      expect(res.status).toBe(200);
+      const disposition = res.headers.get('content-disposition');
+      expect(disposition).toContain('attachment');
+      // Named after the title, not after the opaque storage key.
+      expect(disposition).toContain('holiday.mp4');
     });
   });
 });

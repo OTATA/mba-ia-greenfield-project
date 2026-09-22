@@ -91,6 +91,16 @@ export class InvalidUploadStateException extends DomainException {
   }
 }
 
+export class VideoNotReadyException extends DomainException {
+  constructor(currentStatus: string) {
+    super(
+      'VIDEO_NOT_READY',
+      409,
+      `Video is "${currentStatus}" and cannot be played or downloaded yet`,
+    );
+  }
+}
+
 export class UploadPartMismatchException extends DomainException {
   constructor() {
     super(

@@ -11,6 +11,7 @@ import {
   UploadPartMismatchException,
   UploadTooLargeException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { CompleteVideoUploadDto } from './dto/complete-video-upload.dto';
 import { CreateVideoUploadDto } from './dto/create-video-upload.dto';
@@ -21,7 +22,7 @@ import {
   StorageService,
   type PresignedUploadPart,
 } from './storage/storage.service';
-import { deriveTitleFromFilename } from './title.util';
+import { deriveTitleFromFilename, downloadFilename } from './title.util';
 import {
   ACCEPTED_VIDEO_MIME_TYPES,
   MAX_UPLOAD_SIZE_BYTES,
@@ -48,6 +49,22 @@ export interface VideoProcessJob {
   videoId: string;
   bucket: string;
   storageKey: string;
+}
+
+/** Response of `GET /videos/:publicId`. */
+export interface VideoDetails {
+  public_id: string;
+  title: string;
+  status: VideoStatus;
+  duration_seconds: number | null;
+  thumbnail_url: string | null;
+  processing_error: string | null;
+}
+
+/** Response of the stream and download endpoints. */
+export interface IssuedUrl {
+  url: string;
+  expires_in: number;
 }
 
 @Injectable()
@@ -185,6 +202,96 @@ export class VideosService {
     });
 
     return { public_id: video.public_id, status: VideoStatus.PROCESSING };
+  }
+
+  /**
+   * Resolves the per-video URL to its current state — the endpoint a client
+   * polls while processing runs.
+   *
+   * A video that is not `ready` is visible only to its owner, and an
+   * unauthorized caller gets `404`, never `403`: answering "forbidden" would
+   * confirm that an unpublished video exists behind that id.
+   */
+  async findByPublicId(
+    publicId: string,
+    userId?: string,
+  ): Promise<VideoDetails> {
+    const video = await this.videoRepository.findOneBy({ public_id: publicId });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+
+    if (
+      video.status !== VideoStatus.READY &&
+      !(await this.isOwner(video, userId))
+    ) {
+      throw new VideoNotFoundException();
+    }
+
+    return {
+      public_id: video.public_id,
+      title: video.title,
+      status: video.status,
+      duration_seconds: video.duration_seconds,
+      thumbnail_url: video.thumbnail_key
+        ? this.storageService.thumbnailUrl(video.thumbnail_key)
+        : null,
+      // Only meaningful on a terminal failure; null otherwise keeps the field
+      // from reading as "no error yet" on a video still being processed.
+      processing_error:
+        video.status === VideoStatus.FAILED ? video.processing_error : null,
+    };
+  }
+
+  /**
+   * Short-lived presigned GET for playback. The client issues its own `Range`
+   * requests against this URL and storage answers `206` natively, so no range
+   * handling exists in the API.
+   */
+  async issuePlaybackUrl(publicId: string): Promise<IssuedUrl> {
+    const video = await this.findPlayable(publicId);
+
+    return {
+      url: await this.storageService.presignPlaybackUrl(video.storage_key!),
+      expires_in: this.storageService.presignedUrlTtlSeconds,
+    };
+  }
+
+  /** Same primitive as playback, differing only by the attachment override. */
+  async issueDownloadUrl(publicId: string): Promise<IssuedUrl> {
+    const video = await this.findPlayable(publicId);
+
+    return {
+      url: await this.storageService.presignDownloadUrl(
+        video.storage_key!,
+        downloadFilename(video.title, video.storage_key!),
+      ),
+      expires_in: this.storageService.presignedUrlTtlSeconds,
+    };
+  }
+
+  /**
+   * Shared lookup for the two delivery endpoints.
+   *
+   * Unlike metadata, these disclose that an unready video exists — answering
+   * `409 VIDEO_NOT_READY` rather than `404` is what the contract specifies,
+   * because a player polling a known id needs to tell "not yet" from "gone".
+   */
+  private async findPlayable(publicId: string): Promise<Video> {
+    const video = await this.videoRepository.findOneBy({ public_id: publicId });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException(video.status);
+    }
+    return video;
+  }
+
+  private async isOwner(video: Video, userId?: string): Promise<boolean> {
+    if (!userId) return false;
+    const channel = await this.channelsService.findByUserId(userId);
+    return channel?.id === video.channel_id;
   }
 
   /**

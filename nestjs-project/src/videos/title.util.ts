@@ -14,6 +14,17 @@ const FALLBACK_TITLE = 'Untitled video';
  * `not null`, so this must always return a non-empty string, which is why the
  * fallback exists rather than letting an empty name reach the insert.
  */
+/**
+ * Rebuilds a human-friendly filename for the `attachment` disposition.
+ *
+ * The original client filename is not stored — only the title derived from it
+ * and the object key, which carries the extension. Recombining the two gives
+ * the user a sensible name that also tracks a title edited in a later phase.
+ */
+export function downloadFilename(title: string, storageKey: string): string {
+  return `${title}${path.extname(storageKey)}`;
+}
+
 export function deriveTitleFromFilename(filename: string): string {
   const withoutExtension = path.basename(
     filename ?? '',

@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/9 completed
+**SIs:** 7/9 completed
 
 ### SI-03.1 — Infra: storage, fila e worker no Compose
 - **Status:** completed
@@ -67,9 +67,16 @@
   - Adicionada também `VideoNotFoundException` (404), que o plano lista no Error Catalog mas não entre as exceções do SI. O endpoint de complete precisa dela, e o SI-03.7 vai reusá-la.
 
 ### SI-03.7 — Endpoints de leitura — metadados, streaming e download
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 17 novos (11 unit de visibilidade e entrega, 3 unit do guard, 3 integration, 7 e2e). Suíte completa: 233 passing / 31 suites; e2e 71 passing / 6 suites.
+- **Observations:**
+  - **A ação técnica #3 do plano era inexequível como escrita.** Ela manda marcar metadados com `@Public()`, mas o `JwtAuthGuard` faz `if (isPublic) return true` **antes** de ler o header — então `@CurrentUser()` é sempre `undefined` numa rota pública e o dono nunca seria reconhecido, tornando o AC #2 (dono vê o vídeo em `processing`) impossível de satisfazer. Criado `@OptionalAuth()`: a rota atende anônimo e ainda assim decodifica o token quando há um. Token inválido é tratado como anônimo, não rejeitado — a rota funciona sem credencial, então credencial ruim não pode ser pior que credencial nenhuma. `@Public()` segue sendo o certo para `/stream`, que é anônimo de verdade.
+  - **Assimetria deliberada de divulgação, e ela parece inconsistente à primeira vista.** Metadados de vídeo não-`ready` respondem `404 VIDEO_NOT_FOUND` — idêntico a um id inexistente, para não revelar que existe rascunho ali. Já `/stream` e `/download` respondem `409 VIDEO_NOT_READY`, ou seja, admitem a existência. É o que o contrato especifica, e a razão é legítima: um player que já conhece o id precisa distinguir "ainda não" de "não existe". Há teste e2e asseverando que a resposta de metadados de um vídeo em processing é indistinguível da de um id inexistente.
+  - Download exige autenticação mas **não** exige posse — qualquer usuário autenticado baixa, conforme a Authorization Matrix. O teste e2e usa de propósito o token do *estranho* no caminho feliz, para fixar isso.
+  - `thumbnailUrl` foi para o `StorageService`, não para o serviço de vídeos: construir endereço de objeto é responsabilidade do adaptador de storage, que já detinha `publicEndpoint` e o bucket. O serviço de vídeos só decide *se* há thumbnail.
+  - `downloadFilename` recompõe título + extensão da `storage_key`. O filename original do cliente não é persistido — só o título derivado dele. Recompor dá um nome sensato ao usuário e acompanha automaticamente um título editado na Fase 04.
+  - `processing_error` só é exposto quando o status é `failed`. Num vídeo ainda em processamento, devolver um erro remanescente leria como falha que não aconteceu.
+  - **Teardown dos specs corrigido.** O `afterAll` estourava o timeout de 5s: ele tentava abortar uploads já concluídos, e o SDK da AWS faz retry com backoff antes de desistir. Agora consulta `listMultipartUploadIds()` uma vez e aborta só o que segue aberto, em paralelo com os deletes.
 
 ### SI-03.8 — Worker de vídeo — bootstrap, metadados e thumbnail
 - **Status:** pending

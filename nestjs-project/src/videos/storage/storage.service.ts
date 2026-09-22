@@ -14,6 +14,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Inject, Injectable } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import storageConfig from '../../config/storage.config';
+import { thumbnailPublicUrl } from './storage-key.util';
 import type { ConfigType } from '@nestjs/config';
 
 /** One planned part of a multipart upload, with its presigned URL. */
@@ -79,6 +80,18 @@ export class StorageService {
 
   get presignedUrlTtlSeconds(): number {
     return this.config.presignedUrlTtlSeconds;
+  }
+
+  /**
+   * Stable, unsigned URL for a thumbnail. The thumbnails bucket is public-read
+   * precisely so a listing does not pay one signature per item.
+   */
+  thumbnailUrl(thumbnailKey: string): string {
+    return thumbnailPublicUrl(
+      this.config.publicEndpoint,
+      this.thumbnailsBucket,
+      thumbnailKey,
+    );
   }
 
   // ---------------------------------------------------------------- multipart

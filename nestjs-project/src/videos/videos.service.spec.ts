@@ -8,6 +8,7 @@ import {
   UploadPartMismatchException,
   UploadTooLargeException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { Video, VideoStatus } from './entities/video.entity';
 import { StorageService } from './storage/storage.service';
@@ -28,7 +29,11 @@ interface Mocks {
     createMultipartUpload: jest.Mock;
     presignUploadParts: jest.Mock;
     completeMultipartUpload: jest.Mock;
+    presignPlaybackUrl: jest.Mock;
+    presignDownloadUrl: jest.Mock;
+    thumbnailUrl: jest.Mock;
     uploadPartSizeBytes: number;
+    presignedUrlTtlSeconds: number;
     videosBucket: string;
   };
   queue: { add: jest.Mock };
@@ -53,7 +58,11 @@ function build(): { service: VideosService } & Mocks {
       createMultipartUpload: jest.fn(),
       presignUploadParts: jest.fn(),
       completeMultipartUpload: jest.fn(),
+      presignPlaybackUrl: jest.fn().mockResolvedValue('https://signed/play'),
+      presignDownloadUrl: jest.fn().mockResolvedValue('https://signed/down'),
+      thumbnailUrl: jest.fn((key: string) => `https://public/thumbs/${key}`),
       uploadPartSizeBytes: PART_SIZE,
+      presignedUrlTtlSeconds: 1800,
       videosBucket: 'streamtube-videos',
     },
     queue: { add: jest.fn() },
@@ -288,5 +297,165 @@ describe('VideosService.completeUpload — guards', () => {
         storageKey: 'videos/video-uuid/original.mp4',
       });
     });
+  });
+});
+
+/**
+ * Visibility is the security-bearing branch of the read path: an unpublished
+ * video must be invisible to everyone but its owner, and invisible means
+ * `404`, not `403` — "forbidden" would confirm that something exists behind
+ * that id.
+ */
+describe('VideosService.findByPublicId — visibility', () => {
+  const video = (overrides: Partial<Video> = {}): Video =>
+    ({
+      public_id: 'abc123',
+      channel_id: 'channel-1',
+      title: 'Holiday',
+      status: VideoStatus.READY,
+      duration_seconds: 42,
+      thumbnail_key: 'thumbnails/video-uuid/frame.jpg',
+      processing_error: null,
+      ...overrides,
+    }) as Video;
+
+  it('returns a ready video to an anonymous caller', async () => {
+    const { service, videoRepository, channelsService } = build();
+    videoRepository.findOneBy.mockResolvedValue(video());
+
+    await expect(service.findByPublicId('abc123')).resolves.toEqual({
+      public_id: 'abc123',
+      title: 'Holiday',
+      status: VideoStatus.READY,
+      duration_seconds: 42,
+      thumbnail_url: 'https://public/thumbs/thumbnails/video-uuid/frame.jpg',
+      processing_error: null,
+    });
+    // A ready video is public, so ownership is never even looked up.
+    expect(channelsService.findByUserId).not.toHaveBeenCalled();
+  });
+
+  it('hides an unready video from an anonymous caller', async () => {
+    const { service, videoRepository } = build();
+    videoRepository.findOneBy.mockResolvedValue(
+      video({ status: VideoStatus.PROCESSING }),
+    );
+
+    await expect(service.findByPublicId('abc123')).rejects.toBeInstanceOf(
+      VideoNotFoundException,
+    );
+  });
+
+  it('hides an unready video from a different channel', async () => {
+    const { service, videoRepository, channelsService } = build();
+    videoRepository.findOneBy.mockResolvedValue(
+      video({ status: VideoStatus.PROCESSING }),
+    );
+    channelsService.findByUserId.mockResolvedValue({ id: 'other-channel' });
+
+    await expect(
+      service.findByPublicId('abc123', 'stranger'),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
+  });
+
+  it('shows an unready video to its owner', async () => {
+    const { service, videoRepository, channelsService } = build();
+    videoRepository.findOneBy.mockResolvedValue(
+      video({ status: VideoStatus.PROCESSING, duration_seconds: null }),
+    );
+    channelsService.findByUserId.mockResolvedValue({ id: 'channel-1' });
+
+    await expect(
+      service.findByPublicId('abc123', 'owner'),
+    ).resolves.toMatchObject({
+      status: VideoStatus.PROCESSING,
+      duration_seconds: null,
+    });
+  });
+
+  it('answers 404 for an unknown public id', async () => {
+    const { service, videoRepository } = build();
+    videoRepository.findOneBy.mockResolvedValue(null);
+
+    await expect(service.findByPublicId('nope')).rejects.toBeInstanceOf(
+      VideoNotFoundException,
+    );
+  });
+
+  it('exposes processing_error only on a failed video', async () => {
+    const { service, videoRepository, channelsService } = build();
+    channelsService.findByUserId.mockResolvedValue({ id: 'channel-1' });
+
+    videoRepository.findOneBy.mockResolvedValue(
+      video({ status: VideoStatus.FAILED, processing_error: 'ffprobe failed' }),
+    );
+    await expect(
+      service.findByPublicId('abc123', 'owner'),
+    ).resolves.toMatchObject({ processing_error: 'ffprobe failed' });
+
+    // A video still being processed has no error yet; surfacing a stale one
+    // would read as a failure that has not happened.
+    videoRepository.findOneBy.mockResolvedValue(
+      video({ status: VideoStatus.PROCESSING, processing_error: 'stale' }),
+    );
+    await expect(
+      service.findByPublicId('abc123', 'owner'),
+    ).resolves.toMatchObject({ processing_error: null });
+  });
+
+  it('returns a null thumbnail_url before the worker has produced one', async () => {
+    const { service, videoRepository } = build();
+    videoRepository.findOneBy.mockResolvedValue(video({ thumbnail_key: null }));
+
+    await expect(service.findByPublicId('abc123')).resolves.toMatchObject({
+      thumbnail_url: null,
+    });
+  });
+});
+
+describe('VideosService — delivery URLs', () => {
+  const readyVideo = {
+    public_id: 'abc123',
+    title: 'Holiday',
+    status: VideoStatus.READY,
+    storage_key: 'videos/video-uuid/original.mp4',
+  } as Video;
+
+  it('issues a playback URL with its expiry for a ready video', async () => {
+    const { service, videoRepository, storageService } = build();
+    videoRepository.findOneBy.mockResolvedValue(readyVideo);
+
+    await expect(service.issuePlaybackUrl('abc123')).resolves.toEqual({
+      url: 'https://signed/play',
+      expires_in: 1800,
+    });
+    expect(storageService.presignPlaybackUrl).toHaveBeenCalledWith(
+      'videos/video-uuid/original.mp4',
+    );
+  });
+
+  it('names the download after the title, keeping the stored extension', async () => {
+    const { service, videoRepository, storageService } = build();
+    videoRepository.findOneBy.mockResolvedValue(readyVideo);
+
+    await service.issueDownloadUrl('abc123');
+
+    expect(storageService.presignDownloadUrl).toHaveBeenCalledWith(
+      'videos/video-uuid/original.mp4',
+      'Holiday.mp4',
+    );
+  });
+
+  it.each([
+    ['stream', (s: VideosService) => s.issuePlaybackUrl('abc123')],
+    ['download', (s: VideosService) => s.issueDownloadUrl('abc123')],
+  ])('refuses %s for a video that is not ready', async (_name, call) => {
+    const { service, videoRepository } = build();
+    videoRepository.findOneBy.mockResolvedValue({
+      ...readyVideo,
+      status: VideoStatus.PROCESSING,
+    });
+
+    await expect(call(service)).rejects.toBeInstanceOf(VideoNotReadyException);
   });
 });
