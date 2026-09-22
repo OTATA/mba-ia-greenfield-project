@@ -17,9 +17,10 @@ libs:
     context7_id: "n/a — sourced from npm registry API"
     fetched_at: "2026-09-11T13:23:03+00:00"
   "ioredis":
-    version: "6.0.0"
+    version: "5.11.1"
     context7_id: "n/a — sourced from npm registry API"
     fetched_at: "2026-09-11T13:23:03+00:00"
+    note: "registry latest is 6.0.0, but the resolved tree pins 5.11.1 — see the ioredis section"
 sources_mtime:
   docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-11T13:19:34+00:00"
 ---
@@ -142,4 +143,16 @@ The consumer side is a class decorated with `@Processor(queueName)` extending `W
 
 ## `ioredis`
 
-Backs **TD-03** indirectly — a declared peer of `bullmq`, not used directly by application code. Version 6.0.0, CommonJS, `engines.node >= 20`. Installed so the peer resolves; connection options are supplied through `@nestjs/bullmq`'s `forRootAsync` rather than by instantiating a client directly.
+Backs **TD-03** indirectly — a declared peer of `bullmq`, not used directly by application code. Installed so the peer resolves; connection options are supplied through `@nestjs/bullmq`'s `forRootAsync` rather than by instantiating a client directly.
+
+⚠️ **Resolved version is 5.11.1, not the registry's `latest` of 6.0.0.** Corrected on 2026-09-11 during SI-03.4 after observing the actual install. `typeorm@0.3.28` already depends on `ioredis`, so npm dedupes the whole tree onto a single 5.x copy rather than installing two majors side by side:
+
+```
++-- bullmq@6.3.4
+| `-- ioredis@5.11.1 deduped
++-- ioredis@5.11.1
+`-- typeorm@0.3.28
+  `-- ioredis@5.11.1 deduped
+```
+
+This is correct and requires no action: `bullmq@6.3.4` declares the peer as `ioredis: >=5.0.0`, which 5.11.1 satisfies. Forcing 6.0.0 would split the tree into two ioredis copies for no benefit. Recorded here because a cache that claims 6.0.0 while the lockfile pins 5.11.1 would mislead anyone debugging a Redis-level issue.

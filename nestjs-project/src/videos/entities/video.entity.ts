@@ -104,11 +104,9 @@ export class Video {
   @UpdateDateColumn()
   updated_at: Date;
 
-  // Unidirectional for now: the inverse side (`Channel.videos`) requires the
-  // Video entity to be registered in every DataSource that registers Channel,
-  // which only happens once VideosModule calls TypeOrmModule.forFeature in
-  // SI-03.4. Restored there.
-  @ManyToOne(() => Channel, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Channel, (channel) => channel.videos, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'channel_id' })
   channel: Channel;
 }

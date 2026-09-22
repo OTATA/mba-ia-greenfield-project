@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/9 completed
+**SIs:** 4/9 completed
 
 ### SI-03.1 — Infra: storage, fila e worker no Compose
 - **Status:** completed
@@ -32,9 +32,15 @@
   - Os pacotes AWS SDK instalados (3.1130.0) não introduziram nenhum advisory. O `npm audit` acusa 1 critical em `liquidjs`, dependência transitiva pré-existente — fora do escopo desta fase.
 
 ### SI-03.4 — Fila de processamento e VideosModule
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 3 passing (suíte completa: 192 passing / 28 suites; e2e 52 passing / 3 suites)
+- **Observations:**
+  - **Pendência do SI-03.3 fechada:** `Channel.videos` e o seletor inverso em `Video.channel` foram restaurados. O `forFeature([Video])` do VideosModule é o que torna a entidade visível ao DataSource da aplicação via `autoLoadEntities`, que era exatamente a precondição que faltava. A relação voltou a ser bidirecional conforme `.claude/rules/nestjs-entities.md`.
+  - Como consequência, todo spec que monta a própria DataSource precisou incluir `Video` em `ALL_ENTITIES` — 9 arquivos. Sem isso, qualquer DataSource que registra `Channel` falha com `Entity metadata for Channel#videos was not found`. É o custo de relação bidirecional em suítes que declaram entidades explicitamente.
+  - `queue.waitUntilReady()` devolve `Promise<void>` no `bullmq@6.3.4` — em 5.x devolvia o client Redis. A asserção do teste de alcançabilidade tinha sido escrita contra a assinatura antiga (`toBeDefined()`) e falhava. Corrigida para asserir que a promise **resolve**: ela rejeita se o backend estiver inalcançável, então a resolução é em si a prova de conexão.
+  - `library-refs.md` corrigido: `ioredis` resolve para 5.11.1, não para o `latest` 6.0.0 do registry. `typeorm@0.3.28` já depende de `ioredis`, então o npm deduplica a árvore numa única cópia 5.x. `bullmq@6.3.4` declara o peer como `>=5.0.0`, então está satisfeito — forçar 6.0.0 só duplicaria a árvore.
+  - `VideosModule` exporta `TypeOrmModule` e `BullModule` para que os SIs seguintes (serviço, controller, processor) recebam o repositório de `Video` e a fila por injeção.
+  - Fora de escopo, registrado como tarefa separada: `videos.module.spec.ts` abre conexões reais com Postgres e Redis, o que pela regra "Test Type Selection" do `nestjs-project/CLAUDE.md` exigiria o sufixo `.integration-spec.ts`. Mantido como `.spec.ts` por consistência com os module specs já existentes (`users`, `channels`, `auth`, `mail`, `storage`), que têm o mesmo desvio. Renomear todos de uma vez é uma mudança de convenção, não parte deste SI.
 
 ### SI-03.5 — Endpoint POST /videos — rascunho e upload multipart pré-assinado
 - **Status:** pending
