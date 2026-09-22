@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/9 completed
+**SIs:** 5/9 completed
 
 ### SI-03.1 — Infra: storage, fila e worker no Compose
 - **Status:** completed
@@ -43,9 +43,16 @@
   - Fora de escopo, registrado como tarefa separada: `videos.module.spec.ts` abre conexões reais com Postgres e Redis, o que pela regra "Test Type Selection" do `nestjs-project/CLAUDE.md` exigiria o sufixo `.integration-spec.ts`. Mantido como `.spec.ts` por consistência com os module specs já existentes (`users`, `channels`, `auth`, `mail`, `storage`), que têm o mesmo desvio. Renomear todos de uma vez é uma mudança de convenção, não parte deste SI.
 
 ### SI-03.5 — Endpoint POST /videos — rascunho e upload multipart pré-assinado
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 20 novos (4 unit public-id, 4 unit admission, 5 integration, 6 e2e + 1 wiring do ValidationPipe). Suíte completa: 206 passing / 31 suites; e2e 58 passing / 4 suites.
+- **Observations:**
+  - **Bug de infraestrutura de teste encontrado e corrigido:** `npm run test:e2e` nunca rodou serial. O script é `jest --config ./test/jest-e2e.json`, sem `--runInBand`, e o config não declarava `maxWorkers` — apesar de o `nestjs-project/CLAUDE.md` afirmar que o e2e "already runs with --runInBand". O defeito ficou latente porque só **uma** suíte e2e truncava tabelas; esta é a segunda, e as duas passaram a se atropelar no mesmo banco (`update or delete on table "users" violates foreign key constraint` dentro de `cleanAllTables`). Corrigido com `"maxWorkers": 1` no `test/jest-e2e.json` em vez de uma flag no script, porque o config também cobre invocação direta do jest. O texto do CLAUDE.md foi corrigido para descrever onde a serialização realmente mora.
+  - **Divergência resolvida no plano:** as `### Validation Rules — videos module` pedem `size_bytes <= 10737418240` no DTO, mas o `### Error Catalog`, o AC #2 e o cenário 1.1 do test spec exigem `413 UPLOAD_TOO_LARGE`. Um `@Max` no DTO devolveria `400 VALIDATION_ERROR` e quebraria o contrato documentado. O teto e o allowlist de MIME são, portanto, regras de domínio no serviço; o DTO valida só validade estrutural. O motivo está comentado no próprio DTO para que ninguém "conserte" isso adicionando `@Max` depois.
+  - `ChannelsService` ganhou `findByUserId`. `VideosService` precisa do canal do chamador, mas `Channel` é entidade do ChannelsModule — consultar o repositório de `Channel` de dentro do módulo de vídeos violaria o princípio de SRP do CLAUDE.md, que manda extrair em vez de deixar um módulo possuir entidade alheia.
+  - Ordem de gravação é deliberada: a linha é salva **antes** de abrir o multipart, porque a object key deriva do `id` gerado. A consequência é que uma falha de storage pode deixar uma linha `draft` sem upload — exatamente o resíduo que a faxina do SI-03.9 reclama. A admissão roda antes de qualquer escrita, para que uma requisição recusada não deixe rastro e não polua o sinal da faxina.
+  - O cenário 2.2 do test spec pede asserir que o host da URL da parte "não é o host interno do Compose". Sob teste isso é inasseverável: o `setup-test-env.ts` aponta deliberadamente o endpoint público para o interno, então os dois são o mesmo host. Foi asserido o que é verdadeiro e útil — que o host bate com o endpoint público **configurado** — com comentário remetendo ao `storage.service.integration-spec.ts`, que já cobre a metade "público ≠ interno" com dois hosts genuinamente distintos.
+  - Os cenários e2e ficaram em `test/videos-create-upload.e2e-spec.ts` (o `target_file` do test spec), incluindo o teste de wiring do `ValidationPipe` que a tabela de testes do SI listava como `test/videos.e2e-spec.ts`. Um arquivo por endpoint é o que o test spec prescreve; manter os dois separaria o wiring do resto sem ganho.
+  - Cada `createUpload` abre um multipart real no MinIO. As suítes de integração e e2e abortam explicitamente os uploads que abriram no `afterAll`, senão eles se acumulariam no bucket entre execuções — a faxina que os reclamaria só chega no SI-03.9.
 
 ### SI-03.6 — Endpoint POST /videos/:publicId/complete — handshake e enfileiramento
 - **Status:** pending

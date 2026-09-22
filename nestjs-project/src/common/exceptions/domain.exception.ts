@@ -48,3 +48,23 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class UploadTooLargeException extends DomainException {
+  constructor(declaredBytes: number, maxBytes: number) {
+    super(
+      'UPLOAD_TOO_LARGE',
+      413,
+      `Declared size of ${declaredBytes} bytes exceeds the maximum of ${maxBytes} bytes`,
+    );
+  }
+}
+
+export class UnsupportedContentTypeException extends DomainException {
+  constructor(contentType: string) {
+    super(
+      'UNSUPPORTED_CONTENT_TYPE',
+      415,
+      `Content type "${contentType}" is not an accepted video type`,
+    );
+  }
+}

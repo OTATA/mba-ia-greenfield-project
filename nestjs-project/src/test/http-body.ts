@@ -34,3 +34,11 @@ export interface AuthProfileBody {
   sub: string;
   email: string;
 }
+
+/** `POST /videos` — the client's upload instructions. */
+export interface CreatedUploadBody {
+  public_id: string;
+  upload_id: string;
+  part_size: number;
+  parts: { part_number: number; url: string; content_length: number }[];
+}
